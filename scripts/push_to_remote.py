@@ -104,7 +104,7 @@ def main():
         print(f"[+] Fetching remote tracking info from {clean_url}...")
         fetch_res = run_cmd(["git", "fetch", auth_url, target_branch], mask_token=token, check=False)
         
-        if fetch_res.returncode == 0:
+        if fetch_res.returncode == 0 and not args.force:
             print("[+] Merging existing remote history (e.g. LICENSE/README)...")
             run_cmd(["git", "merge", "FETCH_HEAD", "--allow-unrelated-histories", "-m", "Merge remote repository initial files"], check=False)
 
