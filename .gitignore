@@ -1,1 +1,68 @@
-/target
+# ==========================================
+# Rust build artifacts
+# ==========================================
+/target/
+**/*.rs.bk
+*.pdb
+
+# ==========================================
+# Python artifacts & virtual environments
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# ==========================================
+# Secrets & Environment variables (Security)
+# ==========================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+
+# ==========================================
+# Logs, temporary files & test data
+# ==========================================
+*.log
+wal_test_data/
+benchmark_results/
+*.tmp
+*.temp
+
+# ==========================================
+# Operating System files
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ==========================================
+# IDE & Editor configurations
+# ==========================================
+.idea/
+*.sublime-project
+*.sublime-workspace
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ==========================================
+# Node / Benchmarking artifacts
+# ==========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
