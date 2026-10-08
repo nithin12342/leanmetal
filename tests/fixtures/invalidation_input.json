@@ -1,0 +1,22 @@
+{
+  "simulated_invalidations": [
+    {
+      "event_id": "INV-001",
+      "flag_key": "checkout_v2",
+      "revision": 101,
+      "source_node": "edge-node-01"
+    },
+    {
+      "event_id": "INV-002",
+      "flag_key": "neural_search",
+      "revision": 42,
+      "source_node": "edge-node-02"
+    },
+    {
+      "event_id": "INV-003",
+      "flag_key": "emergency_kill_switch_billing",
+      "revision": 999,
+      "source_node": "admin-gateway-prod"
+    }
+  ]
+}

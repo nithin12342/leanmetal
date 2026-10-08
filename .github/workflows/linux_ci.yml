@@ -1,0 +1,73 @@
+name: Linux Kernel & Regression CI
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  verify-linux-kernel:
+    name: Verify on Linux Kernel (Ubuntu Latest)
+    runs-on: ubuntu-latest
+
+    services:
+      valkey:
+        image: valkey/valkey:8.0-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux Build Essentials & Pingora Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            clang \
+            llvm \
+            libclang-dev \
+            libssl-dev \
+            pkg-config \
+            iproute2 \
+            libelf-dev \
+            zlib1g-dev
+
+      - name: Setup Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cargo Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cargo Check Linux Target with Pingora & io_uring
+        run: cargo check --verbose
+
+      - name: Track upstream Pingora/sfv fix (allowed to fail)
+        # pingora-core 0.4 requires sfv ^0, which resolves to breaking sfv 0.15.
+        # Production builds exclude it via default-off `pingora-edge` feature.
+        # This step stays green while signalling when upstream is fixed.
+        continue-on-error: true
+        run: cargo check --verbose --features pingora-edge
+
+      - name: Run Full Linux Release Test Suite
+        env:
+          VALKEY_URL: "valkey://127.0.0.1:6379"
+          RUST_BACKTRACE: "1"
+        run: cargo test --release -- --nocapture
+
+      - name: Build Docker Container
+        run: docker build -t edgeflag:ci .

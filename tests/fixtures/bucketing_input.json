@@ -1,0 +1,29 @@
+{
+  "test_cases": [
+    {
+      "flag_key": "checkout_v2",
+      "user_id": "user_alpha_001",
+      "rollout_percentage": 50
+    },
+    {
+      "flag_key": "checkout_v2",
+      "user_id": "user_beta_002",
+      "rollout_percentage": 10
+    },
+    {
+      "flag_key": "dark_mode_theme",
+      "user_id": "user_gamma_999",
+      "rollout_percentage": 0
+    },
+    {
+      "flag_key": "dark_mode_theme",
+      "user_id": "user_delta_777",
+      "rollout_percentage": 100
+    },
+    {
+      "flag_key": "payment_gateway_v3",
+      "user_id": "merchant_ny_450",
+      "rollout_percentage": 25
+    }
+  ]
+}

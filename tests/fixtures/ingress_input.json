@@ -1,0 +1,41 @@
+{
+  "flag_to_create": {
+    "key": "checkout_express",
+    "enabled": true,
+    "rules": [
+      {
+        "conditions": [
+          { "field": "country", "op": "Equals", "value": "US" },
+          { "field": "subscription_tier", "op": "Equals", "value": "vip" }
+        ],
+        "rollout_percentage": 100,
+        "variant": "one_click_vip"
+      }
+    ],
+    "default_variant": "standard_3_step"
+  },
+  "evaluations": [
+    {
+      "test_case": "vip_user_evaluation",
+      "flag_key": "checkout_express",
+      "context": {
+        "user_id": "buyer_vip_42",
+        "attributes": {
+          "country": "US",
+          "subscription_tier": "vip"
+        }
+      }
+    },
+    {
+      "test_case": "standard_user_fallback",
+      "flag_key": "checkout_express",
+      "context": {
+        "user_id": "buyer_regular_10",
+        "attributes": {
+          "country": "DE",
+          "subscription_tier": "free"
+        }
+      }
+    }
+  ]
+}

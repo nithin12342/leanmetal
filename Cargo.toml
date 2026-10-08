@@ -1,0 +1,70 @@
+[package]
+name = "edgeflag"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "edgeflag"
+path = "src/lib.rs"
+
+[[bin]]
+name = "edgeflag"
+path = "src/main.rs"
+
+[dependencies]
+# --- Layer 1: Ingress, Caching & WebSockets ---
+TinyUFO = "0.4"
+moka = { version = "0.12", features = ["future", "sync"] }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.26"
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+http = "1"
+rustls = "0.23"
+
+# --- Layer 2: Core Rule Engine ---
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+flatbuffers = "24.3"
+semver = { version = "1.0", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+simd-json = "0.14"
+arc-swap = "1.7"
+smallvec = { version = "1.13", features = ["serde"] }
+
+# --- Layer 3: Ephemeral Cache & Invalidation Mesh (Tier 3 Daemonless P2P Gossip Mesh) ---
+# Zero external daemons: native async peer-to-peer UDP/broadcast gossip
+
+# --- Layer 4: Storage & LSM-Tree WAL ---
+fjall = "2.6"
+heed = "0.21"
+
+# --- Utilities & Logging ---
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.17"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+# --- Platform-specific (Linux io_uring & optional Pingora edge) ---
+# NOTE: `pingora-edge` is opt-in because upstream pingora-core 0.4 declares
+# `sfv = "^0"`, which resolves to sfv 0.15 with a breaking `Parser` API that
+# no longer compiles against pingora-core 0.4. The default production build
+# (Axum + TinyUFO EdgeProxyService) excludes it; enable explicitly to track
+# the upstream fix: `cargo check --features pingora-edge` (Linux only).
+[features]
+default = []
+pingora-edge = ["dep:pingora", "dep:pingora-core", "dep:pingora-limits"]
+# Native AF_XDP zero-copy bind (Linux only, opt-in). Requires a NIC with XDP
+# support + CAP_NET_RAW at runtime; boot falls back to simulation otherwise.
+af-xdp = ["dep:xsk-rs"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.7"
+pingora = { version = "0.4", default-features = false, optional = true }
+pingora-core = { version = "0.4", optional = true }
+pingora-limits = { version = "0.4", optional = true }
+xsk-rs = { version = "0.11", optional = true }
