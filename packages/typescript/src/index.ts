@@ -3,6 +3,9 @@
  * Zero-Overhead Feature Flag & Evaluation Guard Package for Node.js / Browser.
  */
 
+export * from "./features/kernel_bypass";
+export * from "./features/singleflight";
+
 export type AttributeValue = string | number | boolean | string[];
 
 export interface EvaluationContext {
