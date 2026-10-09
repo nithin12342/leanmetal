@@ -1,0 +1,14 @@
+[package]
+name = "zerocopy-broadcast-hub"
+version = "0.1.0"
+edition = "2024"
+description = "Dedicated connection registry and zero-copy Arc<[u8]> WebSocket broadcast fan-out engine"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+
+[lib]
+name = "zerocopy_broadcast_hub"
+path = "src/lib.rs"
+crate-type = ["rlib"]

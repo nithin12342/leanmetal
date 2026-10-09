@@ -1,0 +1,15 @@
+[package]
+name = "lockfree-timeline-swap"
+version = "0.1.0"
+edition = "2024"
+description = "Lock-free copy-on-write pointer replacement timeline feed using ArcSwap concurrency"
+license = "MIT"
+
+[dependencies]
+arc-swap = "1.7"
+serde = { version = "1.0", features = ["derive"] }
+
+[lib]
+name = "lockfree_timeline_swap"
+path = "src/lib.rs"
+crate-type = ["rlib"]
