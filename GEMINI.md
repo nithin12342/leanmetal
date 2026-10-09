@@ -9,3 +9,7 @@
 - **Fast Spot-Check**: Ensure changes are self-evident and reviewable in under 30 seconds.
 - **Permitted Scope**: Limit to typo fixes, boundary/off-by-one corrections, env flags, and isolated config tweaks.
 - **Isolation**: Ensure zero merge conflict risk and clean cherry-pickability across branches.
+
+## Remote Push Schedule Constraint
+- **Restricted Window**: Never push to remote between 09:00 and 18:00 (9 AM – 6 PM) from Monday to Friday.
+- **Permitted Window**: Push only outside 09:00 – 18:00 on weekdays, or anytime on weekends.

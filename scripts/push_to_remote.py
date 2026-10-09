@@ -10,6 +10,7 @@ import getpass
 import os
 import subprocess
 import sys
+from datetime import datetime
 from urllib.parse import quote
 
 REMOTE_REPO = "nithin12342/leanmetal"
@@ -66,8 +67,22 @@ def main():
         action="store_true",
         help="Force push to remote",
     )
+    parser.add_argument(
+        "--ignore-schedule",
+        action="store_true",
+        help="Bypass the Monday-Friday 09:00-18:00 push restriction window",
+    )
 
     args = parser.parse_args()
+
+    now = datetime.now()
+    if now.weekday() < 5 and 9 <= now.hour < 18 and not args.ignore_schedule:
+        print(
+            f"[BLOCKED] Push prohibited between 09:00 and 18:00, Monday to Friday.\n"
+            f"Current time: {now.strftime('%A %H:%M')}. Pushes are only allowed outside this window.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     token = args.token
     if not token or token.startswith("http"):
