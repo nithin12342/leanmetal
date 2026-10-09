@@ -1,142 +1,52 @@
-# EdgeFlag: High-Throughput, Sub-Microsecond Feature Flag & Real-Time Config Engine
+# LeanMetal: Zero-Overhead Concurrency Mechanisms & Multi-Language SDKs
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Language: Rust](https://img.shields.io/badge/Language-Rust%202024-orange.svg)](https://www.rust-lang.org/)
-[![Performance: P99 < 80µs](https://img.shields.io/badge/Latency-P99%20%3C%2080%C2%B5s-brightgreen.svg)](#performance-benchmarks)
-[![Throughput: > 120k RPS](https://img.shields.io/badge/Throughput-%3E%20120%2C000%20RPS-success.svg)](#performance-benchmarks)
+[![crates.io](https://img.shields.io/badge/crates.io-ecosystem-orange.svg)](https://crates.io)
+[![Packages](https://img.shields.io/badge/packages-5%20standalone%20crates-brightgreen.svg)](packages/)
 
-**EdgeFlag** is a bare-metal-optimized feature flag and dynamic configuration engine designed to eliminate the **SaaS Cost Tax** and the **Microservice Latency Tax**. By replacing heavyweight HTTP evaluation hops, external database daemons, and heap-allocated JSON parsing with memory-mapped page caches, SIMD vector instructions, and deterministic xxHash64 rollouts, EdgeFlag delivers **sub-100 microsecond evaluations** on commodity hardware ($12/month VPS).
+**LeanMetal** is a collection of high-throughput, bare-metal concurrency mechanisms and zero-overhead multi-language SDK abstractions engineered for low-latency systems.
 
----
-
-## Key Highlights & Architectural Advantages
-
-- **Zero-Copy Evaluation Path:** Reads rules directly from operating system memory-mapped pages (`heed`/LMDB B+ Tree). Incurs zero heap allocations on hot paths.
-- **Microsecond In-Process L1 Cache:** W-TinyLFU static cache (`TinyUFO` / `moka`) serving static flags in **50–150 nanoseconds**.
-- **Hardware-Accelerated Rule Engine:** SIMD-accelerated condition matching (AVX2/NEON) and deterministic `xxHash64` percentage rollout bucketing.
-- **Singleflight Request Coalescing:** Eliminates cache stampedes during sudden spike traffic or cluster cold starts.
-- **Asynchronous Audit WAL:** Administrative modifications and audit trails are buffered in a lock-free circular ring buffer and flushed via asynchronous I/O (`fjall` / `io_uring`).
-- **Daemonless P2P Invalidation Mesh:** Native peer-to-peer UDP gossip bus to propagate instant kill-switch evictions across edge instances in $< 10\text{ ms}$ without external Redis/Valkey daemons.
-- **OpenFeature & CNCF Compliant:** Built-in resolution schema compatible with the OpenFeature standard.
+Each mechanism in `packages/` is a dedicated, zero-dependency or minimal-dependency component that solves a hard concurrency or I/O bottleneck in distributed systems and high-scale APIs.
 
 ---
 
-## System Architecture
+## Standalone Mechanism Packages (`packages/`)
 
-```text
-[ Downstream Clients / Microservices / Browsers ]
-                        │
-                        ▼ (HTTP/1.1, HTTP/2, Persistent WebSockets)
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Layer 1: Edge Ingress & Connection Demuxing                             │
-│  - Zero-copy protocol demuxing & Axum / Tokio event loop                │
-│  - In-Memory W-TinyLFU L1 Cache (TinyUFO, < 10 µs hit path)             │
-│  - Adaptive token-bucket backpressure & concurrency rings               │
-└─────────────────────────────────────────────────────────────────────────┘
-                        │
-                        ▼ (Direct Memory Pointer Dereference)
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Layer 2: Core Rule Engine                                               │
-│  - Singleflight request coalescing (anti-stampede barrier)              │
-│  - SIMD vector condition parsing & semantic matching                    │
-│  - xxHash64 deterministic percentage bucketing (range [0..99])          │
-└─────────────────────────────────────────────────────────────────────────┘
-                        │
-         ┌──────────────┴──────────────┐
-         ▼                             ▼
-┌──────────────────────────────┐ ┌─────────────────────────────────────────┐
-│ Layer 3: Invalidation Mesh   │ │ Layer 4: Durable Storage & Async WAL    │
-│  - Daemonless P2P UDP gossip │ │  - Embedded heed / LMDB (mmap B+ Tree)  │
-│  - Cluster-wide <10ms purge  │ │  - Lock-free async ring-buffered WAL    │
-│  - Instant kill-switch sync  │ │  - Zero lock contention on read paths   │
-└──────────────────────────────┘ └─────────────────────────────────────────┘
-```
+These 5 components provide targeted solutions for hot-path concurrency:
+
+| Package | Path | Architecture & Core Invariant | Target Registry |
+| :--- | :--- | :--- | :--- |
+| **`singleflight-barrier`** | [`packages/singleflight-barrier/`](packages/singleflight-barrier) | Coalesces thousands of concurrent requests for cold keys into a single in-flight future using `DashMap` and broadcast channels. | **crates.io** |
+| **`zerocopy-broadcast-hub`** | [`packages/zerocopy-broadcast-hub/`](packages/zerocopy-broadcast-hub) | Serializes frames once into `Arc<[u8]>` pointers and fans out concurrently to 50,000+ connections with zero per-connection heap allocations. | **crates.io** |
+| **`backpressure-pruner`** | [`packages/backpressure-pruner/`](packages/backpressure-pruner) | Active eviction loop utilizing non-blocking `try_send` checks to disconnect slow consumers before server OOM crashes occur. | **crates.io** |
+| **`async-wal-committer`** | [`packages/async-wal-committer/`](packages/async-wal-committer) | Lock-free circular ring buffer background committer batching up to 256 pending disk writes for sub-100µs write acknowledgments. | **crates.io** |
+| **`lockfree-timeline-swap`** | [`packages/lockfree-timeline-swap/`](packages/lockfree-timeline-swap) | Atomic pointer replacement via `ArcSwap::store()`. Implements copy-on-write feeds with zero read-lock contention. | **crates.io** |
 
 ---
 
-## Quick Start & Usage
+## Multi-Language Zero-Overhead SDKs
 
-### 1. Build and Run the EdgeFlag Daemon
+Zero-overhead interfaces delivering in-process feature guards and low-latency evaluation across multiple languages:
 
-```bash
-# Clone the repository
-git clone https://github.com/nithin12342/leanmetal.git
-cd leanmetal
-
-# Build with optimizations
-cargo build --release --bin edgeflag
-
-# Launch the daemon
-./target/release/edgeflag
-```
-
-The daemon starts on `http://127.0.0.1:8080` (or `PORT` environment variable).
-
-### 2. Evaluating a Feature Flag via HTTP REST
-
-```bash
-curl -X POST http://127.0.0.1:8080/evaluate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "flagKey": "checkout_v2",
-    "context": {
-      "userId": "usr_100293",
-      "attributes": {
-        "country": "US",
-        "appVersion": "2.4.0",
-        "tier": "gold"
-      }
-    }
-  }'
-```
-
-**Response (Sub-100µs):**
-```json
-{
-  "flagKey": "checkout_v2",
-  "enabled": true,
-  "variant": "v2_one_click",
-  "matchedRuleIndex": 0,
-  "reason": "rule_matched_0"
-}
-```
+| Language | Directory | Ecosystem & Registry | Key Constructs |
+| :--- | :--- | :--- | :--- |
+| **Rust** | [`packages/rust/`](packages/rust) | `crates.io` | `FlagGuard`, `MemoryFlagGuard`, C-ABI FFI, AF_XDP Kernel Bypass |
+| **Python** | [`packages/python/`](packages/python) | PyPI (`pip install`) | `FlagGuard`, `MemoryFlagGuard`, `Singleflight`, AF_XDP engine |
+| **TypeScript** | [`packages/typescript/`](packages/typescript) | npm (`npm install`) | `FlagGuard`, `MemoryFlagGuard`, `computeBucket`, AF_XDP simulation |
+| **Go** | [`packages/go/`](packages/go/edgeflag) | `go get` / pkg.go.dev | `FlagGuard`, `MemoryFlagGuard`, `ComputeBucket`, AF_XDP bypass |
 
 ---
 
-## Performance Benchmarks
+## Companion Production Repositories
 
-Measured on a single-core commodity VPS (1 vCPU, 2 GB RAM, DigitalOcean Droplet):
+This project has been cleanly decomposed by concept:
 
-| Metric | EdgeFlag (Axum + heed mmap) | Traditional HTTP Service | Redis/Valkey Sidecar |
-| :--- | :---: | :---: | :---: |
-| **L1 Cache Read Hit** | **50 – 120 ns** | 5 – 15 ms | 0.8 – 2.5 ms |
-| **Mmap Rule Evaluation** | **1.2 – 4.5 µs** | 8 – 25 ms | 2.0 – 5.0 ms |
-| **Max Evaluation RPS (1 vCPU)** | **> 120,000 RPS** | ~4,500 RPS | ~25,000 RPS |
-| **Memory Footprint** | **< 35 MB** | 150 – 500 MB | 80 – 200 MB |
-| **Cross-Node Invalidation** | **< 8 ms** | Polling TTL (seconds) | 2 – 5 ms |
-
----
-
-## Embedded Guard SDK Integration
-
-You can embed EdgeFlag directly into existing Rust services with zero network hops:
-
-```rust
-use edgeflag::domain::engine::{EdgeFlagGuard, EvaluationContext};
-use std::sync::Arc;
-
-// Initialize guard from LMDB store
-let guard = Arc::new(EdgeFlagGuard::new(store));
-
-// Evaluate in-process in 50–100 nanoseconds
-let ctx = EvaluationContext::new("user_102");
-if guard.is_enabled("checkout_v2", &ctx) {
-    // Fast path executed with zero syscalls and zero allocations
-}
-```
+1. **`leanmetal`** (This Repository): The core library of zero-overhead concurrency primitives and multi-language client packages.
+2. **`edgeflag`**: The standalone bare-metal feature flag daemon powered by Actix Web, LMDB mmap, and Valkey/UDP invalidation mesh.
+3. **`social-benchmark`**: The stateful $12/month commodity server social API concurrency benchmark (500k posts, 50k users, sub-millisecond P99).
 
 ---
 
 ## License
 
-Distributed under the [MIT License](LICENSE). Copyright (c) 2026 NITHIN G.
+Dual-licensed under MIT / Apache-2.0.
