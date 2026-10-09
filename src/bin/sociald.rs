@@ -4,12 +4,10 @@
 
 use edgeflag::domain::social::{MmapSocialStore, SocialEngine, UserProfile};
 use edgeflag::domain::storage::{AsyncWal, AuditWal};
-use edgeflag::interfaces::http::build_benchmark_router;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpListener;
 use tracing::info;
 
 #[tokio::main]
@@ -75,16 +73,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     }
 
-    let app = build_benchmark_router(engine);
-
     let port: u16 = env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8081);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr).await?;
-    info!("sociald listening on http://{}", addr);
+    info!("sociald listening via Actix Web on http://{}", addr);
 
-    axum::serve(listener, app).await?;
+    let engine_data = actix_web::web::Data::new(engine);
+
+    actix_web::HttpServer::new(move || {
+        actix_web::App::new()
+            .app_data(engine_data.clone())
+            .configure(edgeflag::interfaces::http::configure_social_routes)
+    })
+    .bind(addr)?
+    .run()
+    .await?;
+
     Ok(())
 }

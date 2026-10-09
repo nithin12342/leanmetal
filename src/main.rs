@@ -5,13 +5,12 @@
 use edgeflag::domain::ingress::{ConnectionRing, L1StaticCache};
 use edgeflag::domain::invalidation::ValkeyMeshBus;
 use edgeflag::domain::storage::{AsyncWal, AuditWal, MmapFlagStore};
-use edgeflag::interfaces::http::{build_router, AppState, DaemonMetrics};
+use edgeflag::interfaces::http::{AppState, DaemonMetrics};
 use edgeflag::Singleflight;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpListener;
 use tracing::info;
 
 #[tokio::main]
@@ -117,29 +116,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         admin_token,
         metrics,
     };
-    let app = build_router(app_state);
 
-    // 7. Bind and listen
+    // 7. Bind and listen via Actix Web HttpServer
     let port: u16 = env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    let listener = TcpListener::bind(addr).await?;
-    info!("EdgeFlag Daemon actively listening on http://{}", addr);
+    info!("EdgeFlag Daemon actively listening via Actix Web on http://{}", addr);
     info!("Endpoints available:");
-    info!("  - POST   /v1/evaluate            (Programmatic contextual flag evaluation)");
+    info!("  - POST   /v1/evaluate             (Programmatic contextual flag evaluation)");
     info!("  - POST   /v1/openfeature/evaluate (CNCF OpenFeature provider compliant endpoint)");
-    info!("  - PUT    /v1/flags/:id           (Admin Bearer auth flag mutation & replication)");
-    info!("  - DELETE /v1/flags/:id           (Admin Bearer auth flag deletion & replication)");
-    info!("  - GET    /v1/flags/:id           (Programmatic flag inspection)");
-    info!("  - GET    /v1/flags               (List registered flag keys)");
-    info!("  - GET    /v1/stream              (Persistent WebSocket broadcast stream)");
-    info!("  - GET    /health                 (Health & active socket metrics)");
-    info!("  - GET    /metrics                (Prometheus OpenMetrics exposition)");
+    info!("  - PUT    /v1/flags/:id            (Admin Bearer auth flag mutation & replication)");
+    info!("  - DELETE /v1/flags/:id            (Admin Bearer auth flag deletion & replication)");
+    info!("  - GET    /v1/flags/:id            (Programmatic flag inspection)");
+    info!("  - GET    /v1/flags                (List registered flag keys)");
+    info!("  - GET    /health                  (Health & active socket metrics)");
+    info!("  - GET    /metrics                 (Prometheus OpenMetrics exposition)");
 
-    axum::serve(listener, app).await?;
+    let data = actix_web::web::Data::new(app_state);
+
+    actix_web::HttpServer::new(move || {
+        actix_web::App::new()
+            .app_data(data.clone())
+            .configure(edgeflag::interfaces::http::configure_edgeflag_routes)
+    })
+    .bind(addr)?
+    .run()
+    .await?;
 
     Ok(())
 }
