@@ -17,6 +17,8 @@ TinyUFO = "0.4"
 moka = { version = "0.12", features = ["future", "sync"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"
+actix-web = { version = "4", default-features = false, features = ["macros", "compress-brotli", "compress-gzip"] }
+actix-cors = "0.7"
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower = { version = "0.5", features = ["util"] }
 http = "1"
