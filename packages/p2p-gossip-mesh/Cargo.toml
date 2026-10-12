@@ -1,0 +1,14 @@
+[package]
+name = "p2p-gossip-mesh"
+version = "0.1.0"
+edition = "2024"
+description = "Daemonless P2P UDP state delta broadcast and cache invalidation mesh"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+fast-rule-evaluator = { path = "../fast-rule-evaluator" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["net", "sync", "rt", "macros", "time"] }
+thiserror = "2.0"
+tracing = "0.1"

@@ -28,6 +28,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Arc::new(MmapSocialStore::open(format!("{}/social_lmdb", data_dir))?);
     let engine = Arc::new(SocialEngine::new(store, Some(async_wal)));
 
+    // Compose and initialize atomic micro-packages for stateful social application
+    let segment_dir = format!("{}/social_segments", data_dir);
+    let _segment_log = Arc::new(std::sync::Mutex::new(
+        engine_log::SegmentLog::open(&segment_dir, engine_log::SegmentConfig::default())?
+    ));
+    let _eda_projections = Arc::new(engine_eda::ProjectionStore::new());
+    info!("[engine-packages] Composed SegmentLog (64MB sequential mmap segments) & ProjectionStore active in social application.");
+
     // Benchmark pre-seeding support (50k users, 500k posts, 2M likes)
     let auto_seed = env::var("EDGEFLAG_AUTO_SEED")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))

@@ -360,3 +360,122 @@ Methods are annotated with `#[inline(always)]`. In release builds, LLVM optimize
 
 
 
+
+
+---
+
+## 7. Atomic Micro-Packages Implementation Roadmap (Phase 0 to Phase 4)
+
+### Architectural Goal
+Decompose the engine core into 6 isolated, composable **atomic micro-packages (Rust crates)** located under `packages/` to enforce an uncompromising dependency hierarchy with zero circular references, zero dynamic heap allocations on the hot path, and zero hidden memory padding waste.
+
+### Workspace Directory Layout
+
+```
+packages/
+├── engine-layout/              # Foundational Zero-Padding Memory Core (#![no_std])
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs              # Dense struct definitions & assert_dense_layout macro
+│       ├── ring_entry.rs       # 64-byte RingEntry
+│       ├── connection_slot.rs  # 40-byte ConnectionSlot
+│       ├── frame_header.rs     # 24-byte UnifiedFrameHeader
+│       └── event_envelope.rs   # 64-byte EventEnvelope
+│
+├── engine-log/                 # Kafka-Style Sequential Storage & Mmap
+│   ├── Cargo.toml              # depends on engine-layout, heed
+│   └── src/
+│       ├── lib.rs
+│       ├── segment.rs          # 64 MB contiguous segment log
+│       ├── wal_batcher.rs      # Lock-free io_uring SQE batcher
+│       └── mmap_store.rs       # Direct page cache reader (&[u8])
+│
+├── engine-disruptor/           # Lock-Free LMAX Ring Buffer Engine
+│   ├── Cargo.toml              # depends on engine-layout
+│   └── src/
+│       ├── lib.rs
+│       ├── ring.rs             # DisruptorRing<const N: usize>
+│       ├── cursor.rs           # 64-byte padded AtomicU64 SequenceCursor
+│       ├── barrier.rs          # Spin-yield wait strategy SequenceBarrier
+│       └── pipeline.rs         # Chained StagePipeline (Disk -> Bitset -> Business)
+│
+├── engine-wire/                # Manifest-Driven NACK Protocol Engine
+│   ├── Cargo.toml              # depends on engine-layout
+│   └── src/
+│       ├── lib.rs
+│       ├── ledger.rs           # AVX-512 / AVX2 bitset manifest ledger (bts)
+│       ├── nack.rs             # Zero-return NACK dispatcher
+│       ├── codec.rs            # In-place UnifiedCodec parser
+│       └── registry.rs         # Flat 40-byte slab SessionRegistry (100k sockets in 4.0 MB)
+│
+├── engine-eda/                 # Event-Driven State Engine & In-Process Cache
+│   ├── Cargo.toml              # depends on engine-layout, engine-disruptor, engine-log, moka, arc-swap
+│   └── src/
+│       ├── lib.rs
+│       ├── command.rs          # Zero-allocation CommandProcessor
+│       ├── projection.rs       # Lock-free ProjectionStore with ArcSwap
+│       ├── replayer.rs         # Linear SegmentLog SnapshotReplayer
+│       └── cache.rs            # Window-TinyLFU MokaL1Cache (<150ns)
+│
+└── engine-runtime/             # Assembly, Ingress & Host Target
+    ├── Cargo.toml              # depends on all 5 micro-packages, chitchat
+    └── src/
+        ├── lib.rs
+        ├── main.rs             # Top-level binary runner
+        ├── ingress.rs          # Raw UDP / VirtIO ring ingress worker
+        ├── mesh.rs             # In-process P2P gossip mesh (chitchat)
+        └── unikraft.rs         # Standalone KVM .raw kernel target profile
+```
+
+---
+
+### Phased Execution Sequence
+
+#### Stage 1: Foundational Layout (`engine-layout`) [REQ-031 / SPEC-031]
+* **Action:** Create `packages/engine-layout` crate.
+* **Exit Gate:** `RingEntry` (64B), `ConnectionSlot` (40B), `UnifiedFrameHeader` (24B), and `EventEnvelope` (64B) compile with 0 errors and zero padding bytes confirmed by static assertions.
+* **Verification Command:** `cargo test -p engine-layout`
+
+#### Stage 2: Storage & WAL Core (`engine-log`) [REQ-032 / SPEC-032]
+* **Action:** Create `packages/engine-log` crate.
+* **Exit Gate:** 64 MB segment allocator, async batcher, and zero-copy mmap reader compile cleanly; passes segment append and recovery test.
+* **Verification Command:** `cargo test -p engine-log`
+
+#### Stage 3: LMAX Ring Coordination (`engine-disruptor`) [REQ-033 / SPEC-033]
+* **Action:** Create `packages/engine-disruptor` crate.
+* **Exit Gate:** Multi-stage pipeline coordinates Disk, Bitset, and Business stages without deadlocks or allocations; single-core benchmark verifies $\ge 25\text{M ops/sec}$.
+* **Verification Command:** `cargo test -p engine-disruptor`
+
+#### Stage 4: Network Framing & NACK Protocol (`engine-wire`) [REQ-034 / SPEC-034]
+* **Action:** Create `packages/engine-wire` crate.
+* **Exit Gate:** AVX bitset ledger flags missing gaps accurately; 100% receipt produces 0 return packets; session slab allocates 100k sessions in $\le 4.0\,\text{MB}$.
+* **Verification Command:** `cargo test -p engine-wire`
+
+#### Stage 5: State & Event-Sourcing Core (`engine-eda`) [REQ-035 / SPEC-035]
+* **Action:** Create `packages/engine-eda` crate.
+* **Exit Gate:** Command-to-event pipeline generates immutable entries; projections update lock-free; Moka L1 cache hit latency $< 150\,\text{ns}$.
+* **Verification Command:** `cargo test -p engine-eda`
+
+#### Stage 6: Unified Runtime & Host Target (`engine-runtime`) [REQ-036 / SPEC-036]
+* **Action:** Create `packages/engine-runtime` crate.
+* **Exit Gate:** Ingress polls network packets directly into `DisruptorRing`; gossip mesh invalidates sibling nodes; compiles for both Linux and Unikraft freestanding targets.
+* **Verification Command:** `cargo check -p engine-runtime --release`
+
+
+---
+
+### Phased Execution Sequence Overhaul (Phase 8: Zero-Dependency & Pure In-Process Mechanical Runtime)
+
+#### Stage 7: Pure Zero-Dependency SWAR SIMD Scanner (`simd-json-vector`) [REQ-038 / SPEC-038]
+* **Action:** Overhaul `packages/simd-json-vector` into a pure, hand-rolled SWAR bitwise parser with zero external crate dependencies.
+* **Exit Gate:** 64-bit SWAR arithmetic (`swar_match_byte`) and quote parity masks locate structural JSON characters in $< 1\text{ CPU cycle/byte}$; passes unit tests with 0 compiler warnings.
+* **Verification Command:** `cargo test --manifest-path packages/simd-json-vector/Cargo.toml`
+
+#### Stage 8: Hardware-Agnostic DMA Memory Pool (`dma-ring-buffer` / `kernel-bypass-ingress`) [REQ-037 / SPEC-037]
+* **Action:** Replace Linux-exclusive `xsk-rs` with pure zero-dependency contiguous UMEM pool and power-of-two descriptor ring.
+* **Exit Gate:** Compiles and passes unit tests on all platforms (Windows, Linux, macOS) without external dependencies or driver requirements.
+* **Verification Command:** `cargo test --manifest-path packages/kernel-bypass-ingress/Cargo.toml`
+
+#### Stage 9: In-Process Zero-Copy Data Movement Assurance [REQ-039 / SPEC-039]
+* **Action:** Audit all package interfaces to ensure byte travel is strictly minimized: immutable slices (`&[u8]`) on read paths, contiguous pre-allocated slabs (`RingEntry`, `ConnectionSlot`), and sequential 64MB disk appends (`SegmentLog`).
+* **Exit Gate:** 0 intermediate buffer allocations between ingress reception and state projections.

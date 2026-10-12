@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /usr/src/edgeflag
 COPY Cargo.toml Cargo.lock ./
+COPY packages ./packages
 COPY src ./src
 RUN mkdir -p tests && cargo fetch
 COPY . .

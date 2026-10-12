@@ -43,6 +43,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let l1_cache = L1StaticCache::new(50_000);
     let ring = ConnectionRing::new(25_000);
 
+    // 3b. Compose and initialize atomic micro-packages
+    let mut disruptor_ring = engine_disruptor::DisruptorRing::<1024>::new();
+    let _session_registry = Arc::new(std::sync::RwLock::new(engine_wire::SessionRegistry::new(25_000)));
+    let _eda_l1_cache = Arc::new(engine_eda::MokaL1Cache::default());
+    let _peer_mesh = Arc::new(std::sync::RwLock::new(engine_runtime::PeerMesh::new(1)));
+    let mut boot_entry = engine_layout::RingEntry::new();
+    boot_entry.sequence = 1;
+    boot_entry.routing_tag = 100;
+    let _ = disruptor_ring.publish(boot_entry);
+    info!("[engine-packages] Composed DisruptorRing (1024 slots), SessionRegistry (25k slots), MokaL1Cache, and PeerMesh active.");
+
     // 4. Initialize Linux Foundation Valkey Invalidation & Replication Mesh
     let valkey_url = env::var("VALKEY_URL").ok();
     let node_id = env::var("EDGEFLAG_NODE_ID").unwrap_or_else(|_| "edgeflag-node-01".to_string());

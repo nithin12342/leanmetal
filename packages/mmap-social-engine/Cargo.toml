@@ -1,0 +1,15 @@
+[package]
+name = "mmap-social-engine"
+version = "0.1.0"
+edition = "2024"
+description = "High-throughput multi-tier social engine with anti-stampede singleflight and reverse-chronological B+ tree ordering"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+singleflight-barrier = { path = "../singleflight-barrier" }
+async-wal-committer = { path = "../async-wal-committer" }
+TinyUFO = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["sync", "rt", "macros"] }
+thiserror = "2.0"

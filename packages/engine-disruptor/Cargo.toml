@@ -1,0 +1,14 @@
+[package]
+name = "engine-disruptor"
+version = "0.1.0"
+edition = "2024"
+description = "Lock-free LMAX Disruptor ring buffer engine with progressive spin-yield barriers"
+license = "MIT"
+
+[dependencies]
+engine-layout = { path = "../engine-layout" }
+
+[lib]
+name = "engine_disruptor"
+path = "src/lib.rs"
+crate-type = ["rlib"]

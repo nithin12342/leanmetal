@@ -1,0 +1,12 @@
+[package]
+name = "manifest-udp-transport"
+version = "0.1.0"
+edition = "2024"
+description = "Sequential zero-padding Manifesto UDP transport unifying Webhook delivery, WebSocket duplex streaming, and HTTP request semantics with zero TCP head-of-line blocking"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+engine-layout = { path = "../engine-layout" }
+
+[dev-dependencies]
+# Zero dev-dependencies: tests execute purely on core/alloc/std.

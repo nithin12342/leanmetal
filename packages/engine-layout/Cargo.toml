@@ -1,0 +1,13 @@
+[package]
+name = "engine-layout"
+version = "0.1.0"
+edition = "2024"
+description = "Foundational zero-padding memory primitives with compile-time dense layout assertions"
+license = "MIT"
+
+[dependencies]
+
+[lib]
+name = "engine_layout"
+path = "src/lib.rs"
+crate-type = ["rlib"]

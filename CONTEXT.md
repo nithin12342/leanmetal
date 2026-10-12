@@ -167,3 +167,205 @@ $$\text{SOT-005 (Platform)} \longrightarrow \text{SOT-004 (Tier 2 heed Storage)}
 4. **Ingress & L1 Cache (`SOT-001`) [Tier 1]:** Serves hot reads directly in $50\text{–}150\text{ ns}$ via in-process W-TinyLFU (`Arc<[u8]>`) with zero syscalls and zero IPC.
 
 
+
+
+---
+
+## 4. Atomic Micro-Packages Architecture & Bounded Contexts (SOT-007 to SOT-012)
+
+Decomposing the architecture into isolated, composable **atomic micro-packages (Rust crates)** enforces a strict dependency hierarchy with zero circular references, zero dynamic heap allocations on the hot path, and zero hidden padding overhead.
+
+### Atomic Package Dependency Hierarchy
+
+```
+                      ┌────────────────────────┐
+                      │    6. engine-runtime   │ (Top-Level Binary / Unikraft / KVM)
+                      └───────────┬────────────┘
+                                  │
+         ┌────────────────────────┴────────────────────────┐
+         ▼                                                 ▼
+┌──────────────────┐                              ┌──────────────────┐
+│  5. engine-eda   │                              │  4. engine-wire  │
+│  (Event-Sourcing │                              │  (Manifest-NACK  │
+│   & Projections) │                              │   Transport)     │
+└────────┬─────────┘                              └────────┬─────────┘
+         │                                                 │
+         └────────────────────────┬────────────────────────┘
+                                  │
+         ┌────────────────────────┴────────────────────────┐
+         ▼                                                 ▼
+┌──────────────────┐                              ┌──────────────────┐
+│ 3. engine-disrupt│                              │  2. engine-log   │
+│ (LMAX RingBuffer │                              │  (Sequential WAL │
+│  & Sequence Bars)│                              │   & mmap Store)  │
+└────────┬─────────┘                              └────────┬─────────┘
+         │                                                 │
+         └────────────────────────┬────────────────────────┘
+                                  │
+                                  ▼
+                      ┌────────────────────────┐
+                      │    1. engine-layout    │ (Foundational Memory & Primitives)
+                      └────────────────────────┘
+```
+
+---
+
+### Bounded Context 7: Foundational Zero-Padding Memory Core (`SOT-007` - `engine-layout`)
+* **Responsibility:** Foundational primitive data structures, descending byte-packing rules, and compile-time size assertions.
+* **Dependencies:** None (`#![no_std]` capable).
+* **Aggregates:**
+  * **Aggregate:** `DenseMemoryLayout`
+    * **Invariant:** Zero bytes of hidden padding; strictly descending field alignment ($u64 \to u32 \to u16 \to u8 \to \text{bits}$); compile-time static size and alignment verification via `assert_dense_layout<T>()`.
+    * **Entities:**
+      - `RingEntry` (Exactly 64 bytes): Descending alignment fields (`u64` $\to$ `u32` $\to$ `u16` $\to$ `u8` $\to$ bits) with zero padding.
+      - `ConnectionSlot` (Exactly 40 bytes): Contiguous session slab entry holding network address, session metadata, sequence tracking, and flags.
+      - `UnifiedFrameHeader` (Exactly 24 bytes): Network envelope combining RPC correlation, persistent session token, routing tag, and 1-byte opcode.
+      - `EventEnvelope` (Exactly 64 bytes): Packed domain event structure for state changes.
+    * **Value Objects:** `MemoryAlignmentAssert`, `ByteOffset(usize)`
+    * **Ports In:** None (Root foundation).
+    * **Ports Out:** Dense struct layouts and compile-time verification macros to all upstream crates (`engine-log`, `engine-disruptor`, `engine-wire`, `engine-eda`, `engine-runtime`).
+
+---
+
+### Bounded Context 8: Kafka-Style Sequential Storage (`SOT-008` - `engine-log`)
+* **Responsibility:** Linear append-only disk logging and zero-copy page reads.
+* **Dependencies:** `engine-layout`, `heed` (LMDB), `tokio-uring` / raw `io-uring`.
+* **Aggregates:**
+  * **Aggregate:** `SegmentedDiskJournal`
+    * **Invariant:** Writes are strictly append-only into pre-allocated contiguous disk files (64 MB); reads dereference immutable byte slices (`&[u8]`) directly from OS page cache lines without `read()` syscalls; zero write-lock contention.
+    * **Entities:**
+      - `SegmentLog`: Manages fixed-size contiguous disk files (64 MB segments) opened with sequential allocation flags.
+      - `WalBatcher`: Lock-free queue consumer that drains pending writes and issues asynchronous multi-entry submission queue entries (`io_uring SQE`).
+      - `MmapStore`: Direct memory-mapped reader dereferencing immutable byte slices (`&[u8]`) from page cache lines without `read()` syscalls.
+    * **Value Objects:** `SegmentOffset(u64)`, `FlushBarrierToken(u64)`
+    * **Ports In:** Write batch stream from `engine-disruptor` (Stage 1 disk barrier); Range scan requests from `engine-eda`.
+    * **Ports Out:** Durable byte slices (`&[u8]`) to `engine-eda` projections; Segment commit notifications to `engine-disruptor`.
+
+---
+
+### Bounded Context 9: Lock-Free LMAX Ring Buffer Engine (`SOT-009` - `engine-disruptor`)
+* **Responsibility:** In-memory steady-state event coordination, pacing, and barrier synchronization.
+* **Dependencies:** `engine-layout`.
+* **Aggregates:**
+  * **Aggregate:** `LmaxRingPipeline`
+    * **Invariant:** Zero heap allocations on the hot path; ring buffer capacity is power-of-two bounded with bitwise wrapping (`index & (N - 1)`); cursor progress is monotonic atomic 64-bit; consumers coordinate across stages via spin-yield wait strategies (`core::hint::spin_loop()`) without OS mutex contention.
+    * **Entities:**
+      - `DisruptorRing<const N: usize>`: Pre-allocated, power-of-two bounded circular ring buffer of `RingEntry` slots.
+      - `SequenceCursor`: Atomic 64-bit monotonically increasing cursor with strict 64-byte cacheline alignment.
+      - `SequenceBarrier`: Non-blocking dependency coordinator implementing spin-yield wait strategies (`core::hint::spin_loop()`).
+      - `StagePipeline`: Chained multi-consumer barrier orchestration:
+        * *Stage 1:* Disk append barrier (`engine-log`).
+        * *Stage 2:* Bitset ledger barrier (`engine-wire`).
+        * *Stage 3:* Single-threaded business logic execution loop.
+    * **Value Objects:** `SequenceNumber(u64)`, `WaitStrategy`
+    * **Ports In:** Ingress frames published by `engine-runtime`; Domain command entries from `engine-eda`.
+    * **Ports Out:** Sequenced slots to Stage 1 (`engine-log`), Stage 2 (`engine-wire`), and Stage 3 (`engine-eda`).
+
+---
+
+### Bounded Context 10: Manifest-Driven NACK Protocol Engine (`SOT-010` - `engine-wire`)
+* **Responsibility:** Network framing, asymmetric NACK transmission, and SIMD bitset tracking.
+* **Dependencies:** `engine-layout`.
+* **Aggregates:**
+  * **Aggregate:** `ManifestNackTransport`
+    * **Invariant:** 100% receipt emits zero return packets (pure zero ACK wire cost); missing sequence gaps trigger fast NACK frame generation; bitset validation operates in single-instruction CPU bit-test-and-set (`bts`); contiguous 40-byte slab array manages up to 100,000 active socket descriptors in 4.0 MB RAM.
+    * **Entities:**
+      - `ManifestLedger`: Manages batch delivery states using an AVX-512 / AVX2 bitset vector checked via single-instruction bit-test-and-set (`bts`).
+      - `NackDispatcher`: Logic that emits zero return packets on 100% receipt, generating return frames only when a missing sequence gap is flagged.
+      - `UnifiedCodec`: In-place encoder/decoder mapping `DIRECT_CALL (0x01)`, `DIRECT_REPLY (0x02)`, `DUPLEX_STREAM (0x03)`, and `EVENT_NOTIFY (0x04)` directly into `UnifiedFrameHeader`.
+      - `SessionRegistry`: Contiguous 40-byte slab array managing up to 100,000 active socket descriptors in 4.0 MB RAM.
+    * **Value Objects:** `FrameOpCode(u8)`, `SequenceBitset`, `NackRange { start: u64, end: u64 }`
+    * **Ports In:** Raw network frames from `engine-runtime`; Sequenced egress frames from `engine-disruptor`.
+    * **Ports Out:** Decoded events to `engine-disruptor`; Outbound NACK frames to `engine-runtime` socket transport.
+
+---
+
+### Bounded Context 11: Event-Driven State Engine & In-Process Cache (`SOT-011` - `engine-eda`)
+* **Responsibility:** Command validation, domain event sourcing, and projection updates.
+* **Dependencies:** `engine-layout`, `engine-disruptor`, `engine-log`, `moka`, `arc-swap`.
+* **Aggregates:**
+  * **Aggregate:** `EventSourcingState`
+    * **Invariant:** Commands are strictly validated and appended as immutable `EventEnvelope` entries; projection read models are single-threaded or lock-free (`ArcSwap` pointer swaps / flat bitsets); state reconstruction operates by linearly streaming `engine-log` segments on boot; L1 cache hit latency remains $< 150\text{ ns}$.
+    * **Entities:**
+      - `CommandProcessor`: Validates incoming commands and converts approved commands into immutable `EventEnvelope` entries on the ring buffer.
+      - `ProjectionStore`: Single-threaded state machine mutating in-process read models (swapping `ArcSwap` pointers or mutating flat bitsets) with zero locks.
+      - `SnapshotReplayer`: Reconstructs entire in-memory state on boot by linearly streaming the `engine-log` segments into projections.
+      - `MokaL1Cache`: Window-TinyLFU in-memory cache for high-frequency key evaluations ($< 150\text{ ns}$ hit latency).
+    * **Value Objects:** `CommandIntent`, `StateRevision(u64)`, `CacheHit(Arc<[u8]>)`
+    * **Ports In:** Sequenced events from `engine-disruptor` (Stage 3); Log segments from `engine-log`.
+    * **Ports Out:** Read model state queries to client callers; Invalidation tokens to `engine-runtime`.
+
+---
+
+### Bounded Context 12: Assembly, Ingress & Host Target (`SOT-012` - `engine-runtime`)
+* **Responsibility:** Top-level application bootstrap, transport binding, and Unikernel / MicroVM targets.
+* **Dependencies:** `engine-layout`, `engine-log`, `engine-disruptor`, `engine-wire`, `engine-eda`, `chitchat` (Gossip mesh).
+* **Aggregates:**
+  * **Aggregate:** `SystemKernelHost`
+    * **Invariant:** Application boots as a standalone, statically linked `.raw` kernel image bootable directly on KVM with zero Linux kernel baggage (Unikraft profile); raw UDP / VirtIO ring ingress pushes directly to `DisruptorRing` with zero intermediate user/kernel buffer copies; node-to-node invalidation uses in-process P2P gossip mesh without external daemons.
+    * **Entities:**
+      - `UdpIngress`: High-throughput socket worker binding raw UDP/VirtIO rings to the `DisruptorRing`.
+      - `PeerMesh`: Asynchronous gossip coordinator (`chitchat`) broadcasting key invalidations to sibling nodes without Redis/Valkey.
+      - `UnikraftTarget`: Target profile configuration building a standalone, statically linked `.raw` kernel image bootable directly on KVM with zero Linux kernel baggage.
+    * **Value Objects:** `BootProfile`, `GossipMessage`, `VirtIoBuffer`
+    * **Ports In:** Hardware / VirtIO NIC packet descriptors; Peer gossip packets from network.
+    * **Ports Out:** Ingress frames to `engine-disruptor` / `engine-wire`; Egress packets to physical/virtual NIC.
+
+---
+
+### Total Order Execution & Ingress Data Flow
+
+$$\text{VirtIO NIC} \longrightarrow \text{engine-runtime (UdpIngress)} \longrightarrow \text{engine-wire (UnifiedCodec)} \longrightarrow \text{engine-disruptor (RingEntry)}$$
+$$\Downarrow$$
+$$\begin{cases} \text{Stage 1: engine-log (WalBatcher io\_uring SQE)} \\ \text{Stage 2: engine-wire (ManifestLedger AVX Bitset)} \\ \text{Stage 3: engine-eda (ProjectionStore / MokaL1Cache)} \end{cases}$$
+
+
+---
+
+## 5. Architectural Overhaul: Minimal In-Process Data Movement & Zero-Dependency Primitives
+
+### 5.1 The Mechanical Invariance: In-Process vs Outside-of-Process Data Travel
+* **Inside the Application (Zero Data Travel):**
+  * When bytes arrive into memory, they are placed once into contiguous physical slabs (e.g. `RingEntry`, `DmaMemoryPool`).
+  * Downstream components (filters, rules, event-sourcing projections) access the payload exclusively via **immutable slices (`&[u8]`) or atomic pointer updates (`ArcSwap`)**.
+  * The data travel is **the theoretical minimum (0 copies)**: no intermediate `Vec<u8>` serialization, no temporary strings, and zero kernel-to-user-space context transitions.
+* **Outside the Application (Sequential Sequentiality):**
+  * When data must be exported or persisted, it moves **strictly sequentially** via Kafka-style append segments (`SegmentLog`) and contiguous packet descriptor rings.
+  * Memory access is aligned to 64-byte CPU cache lines, eliminating TLB misses and hardware prefetch stalls.
+
+### 5.2 Elimination of Community Criticism & Fragility
+1. **Linux Kernel Bypass Transformed to Hardware-Agnostic DMA:**
+   * Replaced brittle, Linux-only `xsk-rs` driver bindings with **`dma-ring-buffer`**: a pure zero-dependency, cross-platform contiguous UMEM pool and descriptor ring buffer.
+   * Completely eliminates platform-specific compile failures on Windows/macOS while preserving identical mechanical DMA semantics.
+2. **Hand-Rolled SWAR SIMD Scanner:**
+   * Replaced the external `simd-json` crate wrapper with a hand-crafted **64-bit SWAR (SIMD Within A Register)** parser.
+   * Directly scans 8-byte/32-byte chunks using bitwise carry-less arithmetic (`swar_match_byte` and prefix-XOR quote masks) with zero dynamic allocations.
+3. **Intellectual Honesty:**
+   * All packages are explicitly positioned as specialized mechanical primitives rather than drop-in replacements for universal runtimes.
+
+
+### 5.3 Core Manifesto Protocol Integration: Sequential Zero-Padding Memory
+The Manifesto-driven NACK protocol (`engine-wire`) has been rewritten to directly embed the sequential zero-padding memory architecture at its core:
+* **`ManifestFrameHeader` (Exactly 64 Bytes / 1 CPU Cache Line):** Descending-aligned protocol envelope containing monotonic sequence bounds, running popcounts, and status flags with 0% hidden compiler padding.
+* **`SequenceGap` (Exactly 16 Bytes / 2 Words):** Explicit sequence window boundaries `[start_seq..=end_seq]`.
+* **`DenseNackFrame` (Exactly 192 Bytes / 3 Cache Lines):** Packs up to 7 explicit gaps directly adjacent to the header. When gaps occur, the complete NACK frame is dispatched in a single contiguous memory slice.
+* **Contiguous Static 4096-Bit Ledger:** Replaced dynamic `Vec<u64>` allocations with a flat `[u64; 64]` array aligned to 64 bytes. Mark, query, and contiguous completeness evaluations execute via single-cycle bitwise instructions (`bts`, `popcnt`), ensuring zero RAM search latency.
+
+
+### 5.4 Unified Zero-Padding Manifesto UDP Transport Architecture
+* **The Problem with TCP:**
+  TCP imposes connection handshake latency (SYN-ACK), connection control block bloat in kernel RAM, and **Head-of-Line (HoL) blocking** where a single dropped packet stalls unrelated streams.
+* **The Tripartite Paradigm Integration in a Single UDP Package (`manifest-udp-transport`):**
+  1. **HTTP Strength Without Handshake Overhead:** Stateless request/reply paired via 64-bit `correlation_id` in the datagram header. Clients fire requests instantly with zero connection establishment latency.
+  2. **WebSocket Strength Without Head-of-Line Blocking:** Continuous bidirectional virtual streams multiplexed over 256 virtual channel IDs (`channel_id`), tracked by in-memory 40-byte connection slabs (`UdpSessionRegistry`) in flat RAM without TCP socket descriptors.
+  3. **Webhook Strength Without Ingestion Backpressure:** High-scale event notification pushes (`WebhookPush`) tracked via the contiguous Manifesto NACK ledger. In contrast to HTTP webhooks that require slow TCP connections and return ACKs, Manifesto UDP emits **zero return packets on 100% receipt**, transmitting a compact 192-byte `DenseManifestNackPacket` only when a missing sequence gap is flagged.
+* **Sequential Hardware Memory Alignment:**
+  * Header size is strictly fixed to **64 bytes** (1 CPU cache line) aligned to 64 bytes with 0% compiler padding.
+  * Payloads are read directly as zero-copy slices (`&[u8]`) into ring buffers without dynamic heap allocation.
+
+
+### 5.5 Universal Reusability: The Slotted Const-Generic Architecture
+To achieve **true, universal reusability** without hardcoding concrete business structs (`RingEntry`, `ConnectionSlot`) or falling back to slow heap allocations (`Box<T>`, `dyn Trait`), the Manifesto-driven architecture is parameterized via **const-generic compile-time slotted matrices**:
+* **`CacheLineSlot<const BYTES: usize>`:** Guarantees that any arbitrary user memory block is aligned to physical 64-byte cache lines with 0% hidden compiler padding (`BYTES % 64 == 0`).
+* **`ManifestEnvelope<P: Copy>`:** Couples universal 64-byte Manifesto routing headers to an arbitrary user payload type `P: ZeroCopyRecord`.
+* **In-Place Typed Byte Views (`ZeroCopyRecord`):** Enables microservices in finance, gaming, IoT, or web APIs to read payloads directly from contiguous RAM frames (`from_bytes`) with **0 intermediate memory copies** and **0 dynamic deserialization overhead**.

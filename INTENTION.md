@@ -101,3 +101,50 @@ flowchart TD
 
 ### Milestone 5: Auth, OpenFeature & Full System Benchmark
 * Add admin Bearer token auth, OpenFeature output schema, and run full release benchmarks verifying $P_{99} \le 100\,\mu\text{s}$.
+
+---
+
+## 4. Atomic Micro-Packages Architecture & Invariant Enforcement
+
+Decomposing the architecture into isolated, composable **atomic micro-packages (Rust crates)** enforces a strict dependency hierarchy with zero circular references, zero dynamic heap allocations on the hot path, and zero hidden padding overhead.
+
+### Milestone 6: Foundational Memory Core & Sequential WAL Crates
+* Implement `engine-layout` with zero-padding compile-time assertions for `RingEntry` (64B), `ConnectionSlot` (40B), `UnifiedFrameHeader` (24B), and `EventEnvelope` (64B).
+* Implement `engine-log` with 64 MB pre-allocated sequential segments, `io_uring` batching, and zero-copy `mmap` page cache reader.
+* **Verification Target:** Static size assertion pass (`cargo test -p engine-layout`) and sequential append/read throughput $\ge 1.2\,\text{GB/s}$ (`cargo test -p engine-log`).
+
+### Milestone 7: LMAX Disruptor, Asymmetric NACK Wire & Runtime Crates
+* Implement `engine-disruptor` with power-of-two bounded circular buffer and non-blocking spin-yield barriers coordinating Disk, Bitset, and Business logic stages.
+* Implement `engine-wire` with AVX-512/AVX2 bitset manifest ledger (`bts`), zero return frames on 100% receipt, and 40B slab managing 100k sessions in 4.0 MB.
+* Implement `engine-eda` with command-to-event pipeline, `ArcSwap` lock-free projections, and sub-150ns Window-TinyLFU L1 cache.
+* Implement `engine-runtime` assembling ingress UDP/VirtIO rings directly into `DisruptorRing`, P2P gossip mesh, and Unikraft bare-metal KVM target profile.
+* **Verification Target:** Single-core disruptor throughput $\ge 25\text{M ops/sec}$ and clean release compilation of freestanding runtime image.
+
+---
+
+## 5. Milestone 8: Pure Mechanical Zero-Dependency Primitives & Minimal Data Travel Overhaul
+
+### Intention Objective: Eliminate Community Friction, Unsound Wrappers, and Brittle Platform Dependencies
+* Overhaul all foundational mechanisms to operate directly on raw hardware bytes using zero external dependencies where possible.
+* Replace brittle Linux-only `xsk-rs` with cross-platform contiguous `DmaMemoryPool` and power-of-two `DmaDescriptorRing` (`dma-ring-buffer`).
+* Replace the `simd-json` crate wrapper with a hand-rolled 64-bit SWAR (SIMD Within A Register) structural byte indexer (`simd-json-vector`).
+* Guarantee absolute minimal data travel within the process boundary: zero allocations on the read/evaluation path, immutable slices (`&[u8]`), and sequential 64MB append-only storage.
+
+### Verification Targets:
+1. `cargo test --manifest-path packages/simd-json-vector/Cargo.toml`: 100% pass on pure SWAR bitwise indexing with zero external crates.
+2. `cargo test --manifest-path packages/kernel-bypass-ingress/Cargo.toml`: 100% pass on contiguous DMA pool and descriptor ring with zero external crates.
+3. Zero compile warnings and zero circular dependencies.
+
+
+---
+
+## 6. Milestone 9: Universal Slotted Manifesto Architecture & True Reuse Verification
+
+### Intention Objective: Universal Reusability Across Any Domain
+* Transform the Manifesto UDP transport from bespoke, hardcoded models into an universally reusable slotted paradigm.
+* Parameterize physical memory blocks via const-generic `CacheLineSlot<const BYTES: usize>` to adapt to any data structure while guaranteeing 64-byte alignment and 0% padding waste.
+* Decouple the Manifesto UDP transport header from concrete domain models via `ManifestEnvelope<P>`, allowing arbitrary user records `P: ZeroCopyRecord` (orders, telemetry, posts, sensors) to achieve zero-copy deserialization in-place.
+
+### Verification Targets:
+1. `cargo test --manifest-path packages/manifest-udp-transport/Cargo.toml`: 100% pass on 5 unit tests verifying cache-line alignment, slotted envelope roundtrips, and zero padding.
+2. Verified in-place typed mapping: 0 bytes copied between raw UDP slices and typed domain records.

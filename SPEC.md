@@ -328,3 +328,292 @@
 
 
 
+
+
+---
+
+## 9. Atomic Micro-Packages Specifications (REQ-031 to REQ-036 & SPEC-031 to SPEC-036)
+
+### REQ-031: Foundational Zero-Padding Memory Core (`engine-layout`)
+* **Description:** The system must provide foundational primitive data structures with 0% hidden memory padding overhead. All data structures must enforce strictly descending field alignment ($u64 \to u32 \to u16 \to u8 \to \text{bits}$) and `#![no_std]` capability. Exact compile-time byte sizes:
+  - `RingEntry`: Exactly 64 bytes (matching single L1 CPU cacheline).
+  - `ConnectionSlot`: Exactly 40 bytes.
+  - `UnifiedFrameHeader`: Exactly 24 bytes.
+  - `EventEnvelope`: Exactly 64 bytes.
+  Every layout must be validated at compile time via static assertions.
+* **Derived Spec:** `SPEC-031`
+* **Owning Bounded Context:** Foundational Memory Core (`SOT-007`)
+
+### REQ-032: Kafka-Style Sequential Storage & Mmap Zero-Copy Reads (`engine-log`)
+* **Description:** Linear append-only disk logging must allocate fixed-size contiguous disk files (64 MB segments) opened with sequential allocation flags. Disk writes must be batched lock-free and submitted asynchronously via multi-entry submission queues (`io_uring SQE`). Reading committed records must execute directly from the kernel page cache lines via memory-mapped slices (`&[u8]`) with zero `read()` system calls.
+* **Derived Spec:** `SPEC-032`
+* **Owning Bounded Context:** Sequential Storage & WAL (`SOT-008`)
+
+### REQ-033: Lock-Free LMAX Ring Buffer Engine (`engine-disruptor`)
+* **Description:** In-memory steady-state event coordination, pacing, and barrier synchronization must operate with zero dynamic heap allocations on the hot path. The ring buffer capacity must be power-of-two bounded with fast bitwise wrapping. Sequencer cursors must be 64-byte cacheline padded to prevent false sharing. Barrier synchronization between chained consumer stages (Stage 1: Disk Append, Stage 2: Bitset Ledger, Stage 3: Business Logic) must utilize non-blocking spin-yield strategies (`core::hint::spin_loop()`).
+* **Derived Spec:** `SPEC-033`
+* **Owning Bounded Context:** Lock-Free LMAX Ring Buffer Engine (`SOT-009`)
+
+### REQ-034: Manifest-Driven Asymmetric NACK Transport Protocol (`engine-wire`)
+* **Description:** Network framing, wire codec parsing, and delivery tracking must employ asymmetric NACK signaling: 100% successful packet receipt must emit zero return packets over the wire, transmitting return frames only when a missing sequence gap is flagged. Batch receipt states must be tracked via AVX-512 / AVX2 bitset vectors checked via single-instruction bit-test-and-set (`bts`). Up to 100,000 active socket descriptors must be managed within a contiguous 40-byte slab array consuming $\le 4.0\,\text{MB}$ RAM.
+* **Derived Spec:** `SPEC-034`
+* **Owning Bounded Context:** Manifest-Driven NACK Protocol Engine (`SOT-010`)
+
+### REQ-035: Event-Driven State Engine & In-Process Cache (`engine-eda`)
+* **Description:** Incoming commands must be validated and converted into immutable `EventEnvelope` entries on the ring buffer. In-process read model projections must be updated by a single-threaded state machine swapping `ArcSwap` pointers or mutating flat bitsets with zero lock contention. Full system state on boot must be reconstructed by linearly streaming `engine-log` segments into projections. High-frequency queries must be served by a Window-TinyLFU L1 cache with $< 150\,\text{ns}$ hit latency.
+* **Derived Spec:** `SPEC-035`
+* **Owning Bounded Context:** Event-Driven State Engine (`SOT-011`)
+
+### REQ-036: Assembly, Ingress & Host Target (`engine-runtime`)
+* **Description:** The system runtime must assemble all micro-packages into a unified application binary with dual target profiles: Standard Linux and Unikernel / Bare-Metal KVM target (`UnikraftTarget`). Ingress network workers must bind raw UDP / VirtIO ring descriptors directly to the `DisruptorRing` with zero intermediate buffer copies. Node invalidations must broadcast across sibling instances using an in-process P2P gossip mesh (`chitchat`) with zero external daemons.
+* **Derived Spec:** `SPEC-036`
+* **Owning Bounded Context:** Assembly & Host Target (`SOT-012`)
+
+---
+
+## 10. Technical Specifications for Atomic Micro-Packages (SPEC-031 to SPEC-036)
+
+### SPEC-031: Dense Memory Layout Specification (`engine-layout`)
+* **Target Architecture:** `x86_64` / `aarch64` with `#![no_std]` core support.
+* **Padding Overhead:** Strictly 0% padding waste.
+* **Memory Alignments:**
+  ```rust
+  #[repr(C, align(64))]
+  pub struct RingEntry {
+      pub sequence: u64,       // 8B
+      pub timestamp_ns: u64,   // 8B
+      pub session_id: u64,     // 8B
+      pub payload_ptr: u64,    // 8B (virtual or physical address)
+      pub payload_len: u32,    // 4B
+      pub routing_tag: u32,    // 4B
+      pub flags: u16,          // 2B
+      pub event_type: u16,     // 2B
+      pub opcode: u8,          // 1B
+      pub reserved: [u8; 15],  // 15B (Explicit trailing padding to 64B)
+  }
+  // Total: 8 + 8 + 8 + 8 + 4 + 4 + 2 + 2 + 1 + 15 = 64 bytes.
+
+  #[repr(C, align(8))]
+  pub struct ConnectionSlot {
+      pub socket_fd: u64,      // 8B
+      pub last_rx_ns: u64,     // 8B
+      pub expected_seq: u64,   // 8B
+      pub ip_addr_v4: u32,     // 4B
+      pub port: u16,           // 2B
+      pub state_flags: u16,    // 2B
+      pub session_token: u64,  // 8B
+  }
+  // Total: 8 + 8 + 8 + 4 + 2 + 2 + 8 = 40 bytes.
+
+  #[repr(C, align(8))]
+  pub struct UnifiedFrameHeader {
+      pub correlation_id: u64, // 8B
+      pub session_token: u64,  // 8B
+      pub routing_tag: u32,    // 4B
+      pub payload_len: u16,    // 2B
+      pub opcode: u8,          // 1B
+      pub flags: u8,           // 1B
+  }
+  // Total: 8 + 8 + 4 + 2 + 1 + 1 = 24 bytes.
+
+  #[repr(C, align(64))]
+  pub struct EventEnvelope {
+      pub event_id: u64,       // 8B
+      pub aggregate_id: u64,   // 8B
+      pub revision: u64,       // 8B
+      pub timestamp_ns: u64,   // 8B
+      pub schema_version: u32, // 4B
+      pub payload_len: u32,    // 4B
+      pub event_type: u16,     // 2B
+      pub flags: u16,          // 2B
+      pub origin_node_id: u32, // 4B
+      pub payload_inline: [u8; 16], // 16B inline small-payload or pointer
+  }
+  // Total: 8 + 8 + 8 + 8 + 4 + 4 + 2 + 2 + 4 + 16 = 64 bytes.
+  ```
+* **Verification Macro:**
+  ```rust
+  #[macro_export]
+  macro_rules! assert_dense_layout {
+      ($t:ty, $size:expr, $align:expr) => {
+          const _: () = {
+              assert!(core::mem::size_of::<$t>() == $size, "Struct size violation!");
+              assert!(core::mem::align_of::<$t>() == $align, "Struct alignment violation!");
+          };
+      };
+  }
+  ```
+
+### SPEC-032: Kafka-Style Sequential Storage Specification (`engine-log`)
+* **Segment Size:** Fixed 64 MB ($67{,}108{,}864$ bytes) contiguous sparse/pre-allocated files (`posix_fallocate`).
+* **Disk Writing Contract:**
+  - `WalBatcher` drains lock-free pending queue into submission queue entries.
+  - Linux `io_uring` submit with `IOSQE_ASYNC` and `IORING_OP_WRITEV` or `IORING_OP_WRITE_FIXED`.
+  - Batching threshold: 64 entries or $100\,\mu\text{s}$ timeout.
+* **Disk Reading Contract:**
+  - `MmapStore` maps completed segments with `PROT_READ` and `MAP_SHARED`.
+  - Slices returned as `'static` or `'a` borrowed `&[u8]` direct pointer references into OS page cache.
+  - Zero heap buffer allocation on read path.
+* **Latency & Throughput:**
+  - Append Batch Submit Latency: $P_{50} \le 15\,\mu\text{s}$, $P_{99} \le 80\,\mu\text{s}$.
+  - Sequential Read Throughput: $\ge 1.2\,\text{GB/s}$ sustained from NVMe page cache.
+
+### SPEC-033: Lock-Free LMAX Ring Buffer Specification (`engine-disruptor`)
+* **Ring Buffer Topology:** Circular array `[RingEntry; N]` where $N = 2^k$ (default $N = 65{,}536$ slots $= 4.0\,\text{MB}$).
+* **Index Resolution:** `index & (N - 1)` (single CPU instruction bitwise AND).
+* **Cursor Padding:**
+  ```rust
+  #[repr(C, align(64))]
+  pub struct SequenceCursor {
+      pub value: core::sync::atomic::AtomicU64,
+      _pad: [u8; 56],
+  }
+  ```
+* **Barrier Wait Strategy:**
+  - Iteration 1..100: `core::hint::spin_loop()`.
+  - Iteration 101..500: `std::thread::yield_now()`.
+  - Iteration >500: Atomic parking / semaphore wakeup.
+* **Stage Pipeline Contract:**
+  - Producer Cursor $\to$ publishes sequence $S$.
+  - Stage 1 (Disk Append) processes up to $S$.
+  - Stage 2 (Bitset Ledger) processes up to $\min(\text{Stage 1 Cursor}, S)$.
+  - Stage 3 (Business Logic) processes up to $\min(\text{Stage 2 Cursor}, S)$.
+* **Throughput SLO:** $\ge 25{,}000{,}000$ operations/sec across pipeline on single core.
+
+### SPEC-034: Manifest-Driven Asymmetric NACK Specification (`engine-wire`)
+* **Bitset Vector Layout:** Contiguous memory array supporting AVX-512 (512-bit registers) / AVX2 (256-bit registers).
+* **Testing Instruction:** `bts` (bit test and set) instruction executing in 1 clock cycle.
+* **NACK Protocol Rules:**
+  - On incoming frame with sequence $S_i$: mark bit $S_i$ in bitset.
+  - Periodic manifest tick (every $1.0\,\text{ms}$ or every 512 frames): find contiguous zeros in $[S_{\min}, S_{\max}]$.
+  - If zeros detected: emit `NACK_FRAME { start_seq, count }`.
+  - If all bits are 1: emit **zero wire frames** (zero ACK cost).
+* **Codec Opcodes:**
+  - `0x01`: `DIRECT_CALL`
+  - `0x02`: `DIRECT_REPLY`
+  - `0x03`: `DUPLEX_STREAM`
+  - `0x04`: `EVENT_NOTIFY`
+  - `0x05`: `NACK_GAP`
+* **Session Registry:** Flat array `[ConnectionSlot; 100_000]`.
+  - Memory Footprint: $100{,}000 \times 40\,\text{bytes} = 4{,}000{,}000\,\text{bytes} \approx 3.81\,\text{MB}$.
+  - Indexing: Directly indexed by `session_id % 100_000` with verification of `session_token`.
+
+### SPEC-035: Event-Driven State Engine Specification (`engine-eda`)
+* **Command Validation:** Zero-allocation command schema validation against pre-compiled rules.
+* **State Projections:**
+  - In-process read models stored in contiguous arrays or atomic pointer tables (`ArcSwap<ProjectionView>`).
+  - Read query path: dereferences `ArcSwap::load()`, executes query in $< 100\,\text{ns}$ with zero lock contention.
+* **Snapshot Replay:**
+  - Boots by opening `SegmentLog` files from `engine-log`.
+  - Iterates contiguous 64-byte `EventEnvelope` slices at memory bus speed ($\ge 5{,}000{,}000$ events/sec replay).
+* **L1 Cache Contract:**
+  - Window-TinyLFU cache (`moka` / `TinyUFO`) storing top 50,000 hot keys.
+  - Value storage: `Arc<[u8]>`.
+  - Hit latency: $P_{50} \le 75\,\text{ns}$, $P_{99} \le 140\,\text{ns}$.
+
+### SPEC-036: Assembly, Ingress & Host Target Specification (`engine-runtime`)
+* **Unified Binary Targets:**
+  - Target 1: Standard Linux (`x86_64-unknown-linux-musl` / `gnu`) with Tokio / `io_uring` and epoll.
+  - Target 2: Freestanding Unikernel (`x86_64-unknown-none` / Unikraft KVM guest) bootable directly on QEMU / Firecracker / Cloud-Hypervisor.
+* **Ingress Worker Contract:**
+  - Polling loop drains VirtIO Rx ring or raw socket descriptors into batch of `RingEntry` structs.
+  - Pushes directly to `DisruptorRing::publish_batch()`.
+* **Gossip Invalidation Mesh:**
+  - Embeds `chitchat` cluster state machine over UDP port 9870.
+  - Invalidation gossip frame size: $\le 64\,\text{bytes}$ per eviction broadcast.
+  - Convergence time: $\le 5.0\,\text{ms}$ across a 5-node cluster.
+
+
+---
+
+## 11. Overhauled Pure Zero-Dependency Runtime Specifications (REQ-037 to REQ-039)
+
+### REQ-037: Zero-Dependency Hardware DMA Memory Pool (`dma-ring-buffer`)
+* **Description:** Pre-allocates contiguous RAM slabs once at initialization. Ring indexing uses single-cycle bitwise masking (`prod & mask`) on power-of-two capacities ($2^k$). Frame recycling occurs without kernel memory allocations, supporting Windows, Linux, and freestanding bare-metal without `xsk-rs` or external driver dependencies.
+* **Derived Spec:** `SPEC-037`
+
+### REQ-038: Hand-Rolled SWAR SIMD Structural Scanner (`simd-json-vector`)
+* **Description:** Replaces all external JSON crates on the structural indexing path. Operates directly on 64-bit unsigned integers using bitwise subtraction and carry-less logic (`swar_match_byte`) to locate structural delimiters (`{`, `}`, `[`, `]`, `:`, `,`, `"`) in $< 1\text{ CPU cycle/byte}$ with zero heap allocation.
+* **Derived Spec:** `SPEC-038`
+
+### REQ-039: Absolute Theoretical Minimum Data Travel
+* **Description:** Within the process boundary, data travel is bounded to $0\text{ bytes copied}$. Payloads reside in pre-allocated cache-line aligned slabs. Microservices and domain pipelines access state strictly via immutable reference slices (`&[u8]`) or atomic pointer swaps (`ArcSwap`). When writing to disk, writes are sequenced into contiguous 64MB append segments (`SegmentLog`), matching Kafka's sequential hardware access model.
+* **Derived Spec:** `SPEC-039`
+
+### SPEC-037: Pure DMA Ring Memory Specification
+* **UMEM Pool:** Flat `Box<[u8]>` divided into fixed-size frames (default: 2048 bytes).
+* **Descriptor Size:** Exactly 16 bytes (`addr: u64`, `len: u32`, `flags: u32`).
+* **Ring Invariants:** Capacity must be power of two; atomic sequence cursors prevent locking.
+
+### SPEC-038: Pure SWAR SIMD Scanner Specification
+* **Bitmask Algorithm:**
+  $$\text{match}(v, c) = ((v \oplus \text{mask}(c)) - 0x0101010101010101) \ \& \ \neg(v \oplus \text{mask}(c)) \ \& \ 0x8080808080808080$$
+* **Quote Parity:** Carry-less prefix XOR across 64-bit words isolates delimiters inside string literals from structural syntax.
+
+### SPEC-039: Zero Data Travel Memory Highway
+* **In-Memory Hops:** 0 copies between network reception, parsing, and event-sourcing projections.
+* **Storage Hops:** Single sequential append to active 64MB page-cache segment.
+
+
+---
+
+## 12. Manifesto UDP Unified Transport Specifications (REQ-040 to REQ-041)
+
+### REQ-040: Unified Manifesto UDP Datagram Architecture (`manifest-udp-transport`)
+* **Description:** Provides a single transport package combining the strengths of HTTP (request/reply correlation), WebSocket (persistent duplex streams), and Webhooks (high-throughput event push) over raw UDP. Eliminates TCP head-of-line blocking and kernel TCP connection bloat.
+* **Derived Spec:** `SPEC-040`
+
+### REQ-041: Zero-Padding Cache-Line Datagram Alignment
+* **Description:** Datagram header must be exactly 64 bytes aligned to 64 bytes with zero hidden padding. NACK gap retransmission packets must be exactly 192 bytes aligned to 64 bytes. All multi-byte integers must use big-endian or native descending alignment.
+* **Derived Spec:** `SPEC-041`
+
+### SPEC-040: Manifesto UDP Transport Multiplexer Specification
+* **Pattern Enum (`pattern: u8`):**
+  - `0x01`: `HttpRequest` (stateless RPC with correlation ID)
+  - `0x02`: `HttpResponse` (RPC response matching correlation ID)
+  - `0x03`: `WebSocketStream` (sequenced virtual stream without TCP stalls)
+  - `0x04`: `WebhookPush` (high-throughput event push notification)
+  - `0x05`: `NackGap` (Manifesto sequence retransmission frame)
+* **Session Slab:** 40-byte contiguous entries managing up to 100,000 UDP clients in 4.0 MB flat RAM.
+* **Return Wire Traffic:** 0 bytes emitted on 100% receipt; 192-byte `DenseManifestNackPacket` emitted on missing gaps.
+
+### SPEC-041: Cache-Line Aligned Datagram Layout
+```
+Offset  0.. 8: sequence (u64)
+Offset  8..16: correlation_id (u64)
+Offset 16..24: session_token (u64)
+Offset 24..32: timestamp_ns (u64)
+Offset 32..36: routing_tag (u32)
+Offset 36..40: payload_len (u32)
+Offset 40..42: flags (u16)
+Offset 42..43: pattern (u8)
+Offset 43..44: channel_id (u8)
+Offset 44..64: reserved (20 bytes explicit zero padding)
+Total: Exactly 64 bytes (1 CPU Cache Line)
+```
+
+
+---
+
+## 13. Universal Slotted Manifesto Architecture Specifications (REQ-042 to REQ-043)
+
+### REQ-042: Const-Generic Slotted Memory Matrix (`CacheLineSlot<BYTES>`)
+* **Description:** Enables compile-time parameterized cache-line alignment for arbitrary user records. Enforces at compile time that the slotted size is a strict multiple of 64 bytes (`BYTES % 64 == 0`), eliminating hidden struct padding across domain types.
+* **Derived Spec:** `SPEC-042`
+
+### REQ-043: Universal Decoupled Manifesto Envelope (`ManifestEnvelope<P>`)
+* **Description:** Decouples universal Manifesto UDP transport routing from concrete user payloads. Pairs a 64-byte `ManifestUdpHeader` with any arbitrary user record `P: ZeroCopyRecord`. Allows in-place typed byte access (`from_bytes`) directly over contiguous memory frames with 0 intermediate memory copies.
+* **Derived Spec:** `SPEC-043`
+
+### SPEC-042: Slotted Memory Matrix Contract
+* **Alignment:** `align(64)` enforced across all slotted matrix blocks.
+* **Size Constraint:** `const { assert!(BYTES > 0 && BYTES % 64 == 0) }`.
+
+### SPEC-043: Zero-Copy Record Interface Contract
+```rust
+pub trait ZeroCopyRecord: Sized + Copy + 'static {
+    const SIZE: usize;
+    fn validate_bytes(slice: &[u8]) -> bool;
+}
+```
+* **Memory Traversal:** 0 bytes copied; in-place type-casting over DMA RAM frame offsets.

@@ -46,6 +46,14 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# --- Atomic Micro-Packages ---
+engine-layout = { path = "packages/engine-layout" }
+engine-log = { path = "packages/engine-log" }
+engine-disruptor = { path = "packages/engine-disruptor" }
+engine-wire = { path = "packages/engine-wire" }
+engine-eda = { path = "packages/engine-eda" }
+engine-runtime = { path = "packages/engine-runtime" }
+
 [dev-dependencies]
 tempfile = "3.17"
 tower = { version = "0.5", features = ["util"] }

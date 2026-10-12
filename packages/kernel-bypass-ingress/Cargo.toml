@@ -1,0 +1,12 @@
+[package]
+name = "dma-ring-buffer"
+version = "0.1.0"
+edition = "2024"
+description = "Pure hardware-agnostic zero-copy DMA memory pool, circular descriptor rings, and user-space buffer recycling"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Zero external dependencies: pure standard core/alloc/sync.
+
+[dev-dependencies]
+# Zero dev-dependencies.
