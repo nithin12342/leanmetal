@@ -253,4 +253,50 @@ impl SocialStore for MmapSocialStore {
         wtxn.commit()?;
         Ok(())
     }
+
+    fn create_posts_batch(
+        &self,
+        requests: &[(u64, String)],
+    ) -> Result<Vec<PostRecord>, Self::Error> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let mut wtxn = self.env.write_txn()?;
+        let mut results = Vec::with_capacity(requests.len());
+
+        for (i, (author_id, content)) in requests.iter().enumerate() {
+            let post_id = self.seq_counter.fetch_add(1, Ordering::SeqCst) + 1;
+            let post = PostRecord {
+                id: post_id,
+                author_id: *author_id,
+                content: content.clone(),
+                created_at_ms: now_ms + (i as u64),
+                likes_count: 0,
+            };
+
+            let post_bytes = serde_json::to_vec(&post)?;
+            let timeline_key = Self::make_timeline_key(post.created_at_ms, post_id);
+
+            // Update user post count if exists
+            if let Some(user_bytes) = self.users_db.get(&wtxn, author_id)? {
+                let mut user: UserProfile = serde_json::from_slice(user_bytes)?;
+                user.posts_count += 1;
+                let updated_user_bytes = serde_json::to_vec(&user)?;
+                self.users_db.put(&mut wtxn, author_id, &updated_user_bytes)?;
+            }
+
+            self.posts_timeline_db.put(&mut wtxn, &timeline_key, &post_bytes)?;
+            self.posts_by_id_db.put(&mut wtxn, &post_id, &post_bytes)?;
+            results.push(post);
+        }
+
+        wtxn.commit()?;
+        Ok(results)
+    }
 }

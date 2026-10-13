@@ -20,6 +20,10 @@ pub enum SocialEngineError {
     Singleflight(String),
 }
 
+use tokio::sync::{mpsc, oneshot};
+
+type WriteRequest = (u64, String, oneshot::Sender<Result<PostRecord, SocialEngineError>>);
+
 /// Zero-cost, multi-tiered social application engine.
 /// Composes static LMDB storage with sub-microsecond L1 caching,
 /// request coalescing (anti-stampede), and asynchronous ring-buffered WAL.
@@ -31,11 +35,50 @@ pub struct SocialEngine<S: SocialStore> {
     singleflight_user: Singleflight<u64, Result<Option<UserProfile>, String>>,
     singleflight_timeline: Singleflight<String, Result<Vec<EnrichedPost>, String>>,
     async_wal: Option<AsyncWal>,
+    write_tx: mpsc::Sender<WriteRequest>,
 }
 
 impl<S: SocialStore> SocialEngine<S> {
     /// Creates a new high-throughput social engine wrapping the concrete store.
     pub fn new(store: Arc<S>, async_wal: Option<AsyncWal>) -> Self {
+        let (write_tx, mut write_rx) = mpsc::channel::<WriteRequest>(65_536);
+        let store_batch = store.clone();
+
+        // Background Group-Commit Worker:
+        // Automatically coalesces hundreds/thousands of concurrent writes
+        // into a single ACID commit transaction without blocking individual clients.
+        tokio::spawn(async move {
+            let mut batch: Vec<WriteRequest> = Vec::with_capacity(2048);
+
+            while let Some(first) = write_rx.recv().await {
+                batch.push(first);
+
+                // Drain any additional writes that arrived in the same event-loop tick
+                while batch.len() < 2048 {
+                    match write_rx.try_recv() {
+                        Ok(req) => batch.push(req),
+                        Err(_) => break,
+                    }
+                }
+
+                // Execute group commit across all queued writes in 1 transaction
+                let inputs: Vec<(u64, String)> = batch.iter().map(|(a, c, _)| (*a, c.clone())).collect();
+                match store_batch.create_posts_batch(&inputs) {
+                    Ok(posts) => {
+                        for ((_, _, resp_tx), post) in batch.drain(..).zip(posts) {
+                            let _ = resp_tx.send(Ok(post));
+                        }
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        for (_, _, resp_tx) in batch.drain(..) {
+                            let _ = resp_tx.send(Err(SocialEngineError::Store(err_msg.clone())));
+                        }
+                    }
+                }
+            }
+        });
+
         Self {
             store,
             user_cache: Arc::new(TinyUfo::new(100_000, 10_000)),
@@ -43,6 +86,7 @@ impl<S: SocialStore> SocialEngine<S> {
             singleflight_user: Singleflight::new(),
             singleflight_timeline: Singleflight::new(),
             async_wal,
+            write_tx,
         }
     }
 
@@ -109,13 +153,18 @@ impl<S: SocialStore> SocialEngine<S> {
         }
     }
 
-    /// Creates a post, atomically persists it to LMDB, invalidates caches, and records to async WAL.
+    /// Creates a post via the high-throughput group-commit pipeline, invalidates caches, and records to async WAL.
     pub async fn create_post(&self, author_id: u64, content: String) -> Result<PostRecord, SocialEngineError> {
-        // 1. Commit to durable zero-copy store
-        let post = self
-            .store
-            .create_post(author_id, content)
-            .map_err(|e| SocialEngineError::Store(e.to_string()))?;
+        // 1. Submit to group commit batcher
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.write_tx
+            .send((author_id, content, resp_tx))
+            .await
+            .map_err(|e| SocialEngineError::Store(format!("Write queue full: {}", e)))?;
+
+        let post = resp_rx
+            .await
+            .map_err(|_| SocialEngineError::Store("Group commit worker dropped response".into()))??;
 
         // 2. Invalidate top timeline cache so next read sees new post
         self.timeline_cache.remove(&"20:0".to_string());

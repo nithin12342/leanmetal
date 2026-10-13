@@ -37,4 +37,10 @@ pub trait SocialStore: Send + Sync + 'static {
         posts: &[PostRecord],
         likes: &[(u64, u64)],
     ) -> Result<(), Self::Error>;
+
+    /// Executes a group commit of multiple post creation requests in a single ACID write transaction.
+    fn create_posts_batch(
+        &self,
+        requests: &[(u64, String)],
+    ) -> Result<Vec<PostRecord>, Self::Error>;
 }
