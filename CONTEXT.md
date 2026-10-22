@@ -369,3 +369,25 @@ To achieve **true, universal reusability** without hardcoding concrete business 
 * **`CacheLineSlot<const BYTES: usize>`:** Guarantees that any arbitrary user memory block is aligned to physical 64-byte cache lines with 0% hidden compiler padding (`BYTES % 64 == 0`).
 * **`ManifestEnvelope<P: Copy>`:** Couples universal 64-byte Manifesto routing headers to an arbitrary user payload type `P: ZeroCopyRecord`.
 * **In-Place Typed Byte Views (`ZeroCopyRecord`):** Enables microservices in finance, gaming, IoT, or web APIs to read payloads directly from contiguous RAM frames (`from_bytes`) with **0 intermediate memory copies** and **0 dynamic deserialization overhead**.
+
+---
+
+## 6. In-Process Zero-Copy B+Tree (LMDB) & Pipelined Horizontal Assembly Line (Horizontal Scaling Context)
+**Reference Document:** `HORIZONTAL_SCALING_SPEC_20261022_115602.md`
+
+### 6.1 Bounded Context 7: In-Process LMDB Mmap B+Tree Storage Subsystem
+* **Responsibility:** Provide zero-IPC, zero-syscall in-process persistence operating directly within the single virtual address space.
+* **Topography:**
+  - 4,096-byte fixed pages matching the CPU MMU page table size.
+  - Alternating ACID Meta Pages (Page 0 and Page 1) to guarantee crash consistency without write-ahead journal corruption.
+  - Branch nodes with 64-bit page navigation pointers.
+  - Leaf nodes storing key-value pairs sorted in strict ascending byte order.
+* **Composite Timeline Index:** Inverted 16-byte key: `(u64::MAX - event_timestamp_ms, entity_id)`. Newest events sort to the leftmost leaf page, converting descending feed queries into linear forward memory scans.
+* **Lock-Free Read-Copy-Update (`ArcSwap`):** Top 50 timeline post IDs are maintained in a contiguous snapshot pointer. Feed lookups execute via atomic pointer load (`load_full`) in $\le 150\text{ nanoseconds}$ without touching disk or locking transactions.
+
+### 6.2 Bounded Context 8: Pipelined Horizontal Assembly Line
+* **Stage 0 (Kernel Bypass Ingress):** Linux AF_XDP in zero-copy driver mode (`XDP_ZEROCOPY`), DMA directly to 128 MiB UMEM packet buffer pool (65,536 chunks @ 2,048B), 24-byte `UnifiedFrameHeader` validation, SIMD AVX2 bitset manifest check.
+* **Stage 1 (Single-Writer Domain Engine):** Zero mutexes, zero atomic CAS contention. Feeds served via `ArcSwap` ($\le 150\text{ ns}$); point queries served via LMDB mmap page traversal ($\le 1.25\ \mu\text{s}$); writes enqueued non-blockingly to lock-free WAL channel.
+* **Stage 2 (Asynchronous WAL Batch Committer):** Linux `io_uring` with SQPOLL draining up to 256 writes per event loop tick, appending directly to active 64MB segment files with `O_DIRECT | O_DSYNC`.
+* **Stage 3 (Zero-Copy Wire Egress Pacer):** Static pre-trained 64 KiB dictionary vector compression ($8.18\times$ wire reduction, 171B average frames), pushing UMEM chunk pointers directly to AF_XDP TX ring.
+

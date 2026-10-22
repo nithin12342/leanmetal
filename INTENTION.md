@@ -148,3 +148,28 @@ Decomposing the architecture into isolated, composable **atomic micro-packages (
 ### Verification Targets:
 1. `cargo test --manifest-path packages/manifest-udp-transport/Cargo.toml`: 100% pass on 5 unit tests verifying cache-line alignment, slotted envelope roundtrips, and zero padding.
 2. Verified in-place typed mapping: 0 bytes copied between raw UDP slices and typed domain records.
+
+---
+
+## 7. Milestone 10: In-Process Zero-Copy B+Tree (LMDB) & Horizontal Scaling Engine
+**Reference Document:** `HORIZONTAL_SCALING_SPEC_20261022_115602.md`  
+**Target Branch:** `feat/horizontal-scaling`  
+
+### Intention Objective: Horizontal Slicing & Pure In-Process B+Tree Mechanics
+* Replace all cellular abstractions with an embedded, memory-mapped (`mmap`) B+Tree engine derived from the LMDB architecture.
+* Slicing into a strictly sequential 4-stage horizontal assembly line:
+  - **Stage 0 (Ingress):** Linux AF_XDP zero-copy UMEM pool (128 MiB) + 24-byte `UnifiedFrameHeader` + AVX2 bitset NACK.
+  - **Stage 1 (Domain):** Single-writer lock-free `ArcSwap` timeline reads ($\le 150\text{ ns}$) and zero-copy LMDB page traversals ($\le 1.25\ \mu\text{s}$).
+  - **Stage 2 (WAL):** Linux `io_uring` group-commit worker batching up to 256 writes per event loop tick to 64MB segment files with `O_DIRECT | O_DSYNC`.
+  - **Stage 3 (Egress):** Zero-copy wire egress with static pre-trained 64 KiB dictionary vector compression ($8.18\times$ reduction, 171B average frames).
+* Enforce **Strict Descending Alignment (Zero-Padding)** invariant: 64-bit $\to$ 32-bit $\to$ 16-bit $\to$ 8-bit $\to$ sub-byte bitfields. Compile-time assertions `size_of::<T>() == N` across all layout structures.
+
+### Verification Targets:
+1. Compile-time size & alignment verification:
+   - `size_of::<RingEntry>() == 64` (`align(64)`)
+   - `size_of::<ConnectionSlot>() == 40` (`align(8)`)
+   - `size_of::<UnifiedFrameHeader>() == 24` (`align(8)`)
+2. Feed read path benchmark: $P_{50} \le 150\text{ ns}$ using `ArcSwap` snapshot pointer.
+3. Group-commit write throughput: $\ge 7{,}000\text{ writes/sec}$ on containerized local tests, scaling to $\ge 500{,}000\text{ writes/sec}$ under batch aggregation.
+4. Total single-node capacity ceiling verified at $5{,}387{,}931$ concurrent active users on 1 vCPU / 2GB RAM / 1 Gbps NIC hardware envelope.
+

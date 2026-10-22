@@ -617,3 +617,51 @@ pub trait ZeroCopyRecord: Sized + Copy + 'static {
 }
 ```
 * **Memory Traversal:** 0 bytes copied; in-place type-casting over DMA RAM frame offsets.
+
+---
+
+## 14. In-Process Zero-Copy B+Tree (LMDB) & Horizontal Scaling Engine (REQ-044 to REQ-048)
+**Reference Document:** `HORIZONTAL_SCALING_SPEC_20261022_115602.md`
+
+### REQ-044: Strict Descending Alignment Memory Architecture
+* **Description:** Structs must sort fields monotonically: 64-bit $\to$ 32-bit $\to$ 16-bit $\to$ 8-bit $\to$ sub-byte bitfields. Zero uninitialized padding bytes are permitted. Compile-time assertions `size_of::<T>() == N` are mandatory.
+* **Derived Spec:** `SPEC-044`
+
+### REQ-045: In-Process LMDB Mmap B+Tree & Reverse-Chronological Indexing
+* **Description:** Replace cellular abstractions with embedded memory-mapped B+Tree operating directly inside the process address space. Use 16-byte composite inverted keys `(u64::MAX - timestamp_ms, entity_id)` so newest records naturally sort to the leftmost leaf page for contiguous sequential range reads.
+* **Derived Spec:** `SPEC-045`
+
+### REQ-046: Sub-150ns Lock-Free Timeline Generation via `ArcSwap`
+* **Description:** The top 50 timeline post IDs must be maintained in an atomic snapshot pointer (`ArcSwap`). Read requests execute an atomic pointer load (`load_full`) in $\le 150\text{ nanoseconds}$ without database locks. Writes execute an atomic pointer swap on new post creation.
+* **Derived Spec:** `SPEC-046`
+
+### REQ-047: Linux `io_uring` Asynchronous Group-Commit WAL
+* **Description:** Write mutations must be batched asynchronously up to 256 operations or $50\,\mu\text{s}$ timeout per event loop tick, appending directly to active 64MB segment files with `O_DIRECT | O_DSYNC` to eliminate single-writer transaction stalls.
+* **Derived Spec:** `SPEC-047`
+
+### REQ-048: Manifest-Driven UDP Ingress & Static Pre-Trained Dictionary Vector Compression
+* **Description:** Ingress traffic runs via AF_XDP into a 128 MiB UMEM pool with 24B `UnifiedFrameHeader` and AVX2 bitset verification. Outbound frames compress dynamic data against a static 64 KiB dictionary vector ($8.18\times$ wire reduction, 171B average frame size).
+* **Derived Spec:** `SPEC-048`
+
+### SPEC-044: Static Struct Layout Invariants
+* `RingEntry`: Exactly 64 bytes (`align(64)`).
+* `ConnectionSlot`: Exactly 40 bytes (`align(8)`).
+* `UnifiedFrameHeader`: Exactly 24 bytes (`align(8)`).
+
+### SPEC-045: Embedded LMDB Mmap Topography
+* Fixed 4,096-byte pages matching host MMU size.
+* Alternating Meta Page 0 and Meta Page 1 for crash consistency.
+* Zero-copy leaf slices returned directly as `&[u8]`.
+
+### SPEC-046: `ArcSwap` Lock-Free Invariant
+* Feed generation latency: $P_{50} \le 150\text{ ns}$, $P_{99} \le 500\text{ ns}$.
+* Zero mutexes, zero atomic CAS loops on read paths.
+
+### SPEC-047: `io_uring` Group-Commit Specification
+* Maximum batch size: 256 entries.
+* Group commit latency: $P_{50} \le 20\,\mu\text{s}$, $P_{99} \le 100\,\mu\text{s}$.
+
+### SPEC-048: Wire & Bandwidth Budget
+* Target interface: 1.0 Gbps NIC ($100\text{ MB/s}$ usable).
+* Saturated user capacity: $5{,}387{,}931$ concurrent sessions at $18.56\text{ B/s}$ per user.
+
