@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "edgeflag"
 path = "src/main.rs"
 
+[[bench]]
+name = "bench_architecture_limits"
+harness = false
+
 [dependencies]
 # --- Layer 1: Ingress, Caching & WebSockets ---
 TinyUFO = "0.4"

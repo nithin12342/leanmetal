@@ -9,6 +9,7 @@
 pub mod frame;
 pub mod session;
 pub mod multiplexer;
+pub mod geometric;
 
 pub use frame::{
     CacheLineSlot, DenseManifestNackPacket, ManifestEnvelope, ManifestUdpHeader, SequenceGap,
@@ -16,6 +17,12 @@ pub use frame::{
 };
 pub use session::{UdpSessionRegistry, DEFAULT_MAX_SESSIONS};
 pub use multiplexer::ManifestoUdpMultiplexer;
+pub use geometric::{
+    find_missing_chunks_tzcnt, next_missing_chunk_index, GeometricFrameCodec,
+    GeometricManifestHeader, InPlaceDmaArena, CACHE_LINE_BYTES, CHUNK_CACHE_LINES,
+    CHUNK_STRIDE_BYTES, ETHERNET_MTU_BYTES, GEOMETRIC_HEADER_BYTES, MAX_UDP_PAYLOAD_BYTES,
+    MAX_WIRE_FRAME_BYTES,
+};
 
 #[cfg(test)]
 mod tests {
