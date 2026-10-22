@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "bench_architecture_limits"
 harness = false
 
+[[bench]]
+name = "bench_sustained_5min"
+harness = false
+
 [dependencies]
 # --- Layer 1: Ingress, Caching & WebSockets ---
 TinyUFO = "0.4"
@@ -57,6 +61,7 @@ engine-disruptor = { path = "packages/engine-disruptor" }
 engine-wire = { path = "packages/engine-wire" }
 engine-eda = { path = "packages/engine-eda" }
 engine-runtime = { path = "packages/engine-runtime" }
+manifest-udp-transport = { path = "packages/manifest-udp-transport" }
 
 [dev-dependencies]
 tempfile = "3.17"
