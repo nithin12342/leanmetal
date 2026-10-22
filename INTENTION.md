@@ -173,3 +173,27 @@ Decomposing the architecture into isolated, composable **atomic micro-packages (
 3. Group-commit write throughput: $\ge 7{,}000\text{ writes/sec}$ on containerized local tests, scaling to $\ge 500{,}000\text{ writes/sec}$ under batch aggregation.
 4. Total single-node capacity ceiling verified at $5{,}387{,}931$ concurrent active users on 1 vCPU / 2GB RAM / 1 Gbps NIC hardware envelope.
 
+---
+
+## 8. Milestone 11: Geometric Manifest-Driven UDP Engine & Direct DMA In-Place Placement
+**Reference File:** `packages/manifest-udp-transport/src/geometric.rs`  
+**Target Branch:** `feat/horizontal-scaling`  
+
+### Intention Objective: Zero Wire Padding & Exact Cacheline Strides
+* **Upfront Geometric Manifest:** Sender transmits a 62-byte `GeometricManifestHeader` declaring total message size, stride size, and chunk count, allowing receiver to map exact memory geometry before payload arrives.
+* **Direct DMA Memory Placement:** Bypasses intermediate kernel and socket buffers via:
+  $$\text{Target Memory Address} = \text{Base Arena Offset} + (\text{Chunk Index} \times \text{Chunk Stride})$$
+* **Cache-Engineered MTU & Strides:** Chunks sized to exactly 1,408 bytes ($22 \times 64\text{B}$ cache lines). With 62B header, total wire frame is 1,470 bytes $\le 1,472$ UDP MTU (0 IP fragmentation) and every chunk lands on a 64-byte L1 cacheline boundary.
+* **Dual-Layer Padding Strategy:**
+  - *Zero Wire Padding:* Transmits exact byte payloads over the wire to conserve network bandwidth.
+  - *64-Byte Host Memory Stride:* Enforces 64-byte alignment inside host RAM for full-width AVX/SIMD vectorization.
+* **Zero-Cost Virtual Memory Backing:** Unwritten slots map to the kernel Copy-on-Write `empty_zero_page` (page-aligned anonymous allocation), ensuring missing chunks read as zero with zero `memset` cycles.
+* **1-Cycle Selective NACK:** Missing packets detected via bitwise NOT of L1 leaf bitmask followed by `_tzcnt_u64` in single-digit clock cycles.
+
+### Verification Targets:
+1. `size_of::<GeometricManifestHeader>() == 62` verified at compile time.
+2. 1,470-byte frame fits within standard 1,500-byte Ethernet MTU with 0 fragmentation.
+3. 100% test pass across all 10 tests in `manifest-udp-transport` and 39 tests across the workspace.
+4. Out-of-order chunk arrivals placed in-place with zero memory copying and reconstructed with 100% data fidelity.
+
+
