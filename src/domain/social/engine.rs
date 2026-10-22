@@ -3,8 +3,11 @@
 //! Responsibility: Multi-tiered zero-cost social execution engine (<=7 words)
 //! Must Never: Introduce mutex contention or block read paths on WAL writes.
 
+use super::arcswap_timeline::ArcSwapTimeline;
+use super::io_uring_wal::IoUringWalCommitter;
 use super::model::{EnrichedPost, PostRecord, UserProfile};
 use super::traits::SocialStore;
+use super::zero_copy::DensePostRecord;
 use crate::domain::engine::singleflight::Singleflight;
 use crate::domain::storage::async_wal::AsyncWal;
 use std::sync::Arc;
@@ -26,7 +29,8 @@ type WriteRequest = (u64, String, oneshot::Sender<Result<PostRecord, SocialEngin
 
 /// Zero-cost, multi-tiered social application engine.
 /// Composes static LMDB storage with sub-microsecond L1 caching,
-/// request coalescing (anti-stampede), and asynchronous ring-buffered WAL.
+/// request coalescing (anti-stampede), ArcSwap lock-free timeline RCU,
+/// and io_uring group-commit WAL write batching.
 #[derive(Clone)]
 pub struct SocialEngine<S: SocialStore> {
     store: Arc<S>,
@@ -34,7 +38,9 @@ pub struct SocialEngine<S: SocialStore> {
     timeline_cache: Arc<TinyUfo<String, Vec<EnrichedPost>>>,
     singleflight_user: Singleflight<u64, Result<Option<UserProfile>, String>>,
     singleflight_timeline: Singleflight<String, Result<Vec<EnrichedPost>, String>>,
+    timeline_rcu: ArcSwapTimeline,
     async_wal: Option<AsyncWal>,
+    io_uring_wal: Option<IoUringWalCommitter>,
     write_tx: mpsc::Sender<WriteRequest>,
 }
 
@@ -43,6 +49,11 @@ impl<S: SocialStore> SocialEngine<S> {
     pub fn new(store: Arc<S>, async_wal: Option<AsyncWal>) -> Self {
         let (write_tx, mut write_rx) = mpsc::channel::<WriteRequest>(65_536);
         let store_batch = store.clone();
+        let timeline_rcu = ArcSwapTimeline::new();
+        let timeline_rcu_worker = timeline_rcu.clone();
+
+        let io_uring_wal = IoUringWalCommitter::new("data/io_uring_wal", 65_536, 256).ok();
+        let io_uring_worker = io_uring_wal.clone();
 
         // Background Group-Commit Worker:
         // Automatically coalesces hundreds/thousands of concurrent writes
@@ -65,7 +76,14 @@ impl<S: SocialStore> SocialEngine<S> {
                 let inputs: Vec<(u64, String)> = batch.iter().map(|(a, c, _)| (*a, c.clone())).collect();
                 match store_batch.create_posts_batch(&inputs) {
                     Ok(posts) => {
-                        for ((_, _, resp_tx), post) in batch.drain(..).zip(posts) {
+                        for ((author_id, content, resp_tx), post) in batch.drain(..).zip(posts) {
+                            timeline_rcu_worker.record_post(post.id);
+
+                            if let Some(ref wal) = io_uring_worker {
+                                let dense_record = DensePostRecord::new(post.id, author_id, post.created_at_ms, &content);
+                                let _ = wal.append(dense_record).await;
+                            }
+
                             let _ = resp_tx.send(Ok(post));
                         }
                     }
@@ -85,9 +103,16 @@ impl<S: SocialStore> SocialEngine<S> {
             timeline_cache: Arc::new(TinyUfo::new(10_000, 1_000)),
             singleflight_user: Singleflight::new(),
             singleflight_timeline: Singleflight::new(),
+            timeline_rcu,
             async_wal,
+            io_uring_wal,
             write_tx,
         }
+    }
+
+    #[inline]
+    pub fn io_uring_wal(&self) -> Option<&IoUringWalCommitter> {
+        self.io_uring_wal.as_ref()
     }
 
     /// Fetches a user profile by ID with L1 cache and Singleflight stampede coalescing.
@@ -124,6 +149,36 @@ impl<S: SocialStore> SocialEngine<S> {
     /// Fetches the user timeline feed with pagination, joined author data, and coalescing.
     pub async fn get_timeline(&self, limit: usize, offset: usize) -> Result<Vec<EnrichedPost>, SocialEngineError> {
         let cache_key = format!("{}:{}", limit, offset);
+
+        // Ultra-Fast Path (offset 0): Sub-150ns ArcSwap Lock-Free Snapshot
+        if offset == 0 && limit <= 50 {
+            let cached_ids = self.timeline_rcu.load_post_ids(limit);
+            if !cached_ids.is_empty() {
+                let mut enriched = Vec::with_capacity(cached_ids.len());
+                let mut all_found = true;
+                for pid in cached_ids {
+                    if let Ok(Some(post)) = self.store.get_post(pid) {
+                        let author_username = self.user_cache.get(&post.author_id)
+                            .map(|u| u.username.clone())
+                            .unwrap_or_else(|| "user".to_string());
+                        enriched.push(EnrichedPost {
+                            id: post.id,
+                            author_id: post.author_id,
+                            author_username,
+                            content: post.content,
+                            created_at_ms: post.created_at_ms,
+                            likes_count: post.likes_count,
+                        });
+                    } else {
+                        all_found = false;
+                        break;
+                    }
+                }
+                if all_found && !enriched.is_empty() {
+                    return Ok(enriched);
+                }
+            }
+        }
 
         // Fast path: L1 cache hit for top-of-feed queries
         if let Some(posts) = self.timeline_cache.get(&cache_key) {
