@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edgeflag-zero-overhead"
+version = "0.1.0"
+description = "Zero-overhead in-process feature flag evaluation & guard SDK for Python"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "EdgeFlag Authors" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.optional-dependencies]
+fast = ["xxhash>=3.0"]

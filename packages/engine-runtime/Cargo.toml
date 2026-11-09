@@ -1,0 +1,22 @@
+[package]
+name = "engine-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Assembly, network ingress worker, P2P gossip mesh and Unikraft host target profile"
+license = "MIT"
+
+[dependencies]
+engine-layout = { path = "../engine-layout" }
+engine-log = { path = "../engine-log" }
+engine-disruptor = { path = "../engine-disruptor" }
+engine-wire = { path = "../engine-wire" }
+engine-eda = { path = "../engine-eda" }
+
+[lib]
+name = "engine_runtime"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "engine-runtime"
+path = "src/main.rs"

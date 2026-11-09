@@ -1,0 +1,35 @@
+{
+  "total_evaluated": 5,
+  "results": [
+    {
+      "flag_key": "checkout_v2",
+      "user_id": "user_alpha_001",
+      "computed_bucket": 52,
+      "is_enabled": false
+    },
+    {
+      "flag_key": "checkout_v2",
+      "user_id": "user_beta_002",
+      "computed_bucket": 35,
+      "is_enabled": false
+    },
+    {
+      "flag_key": "dark_mode_theme",
+      "user_id": "user_gamma_999",
+      "computed_bucket": 34,
+      "is_enabled": false
+    },
+    {
+      "flag_key": "dark_mode_theme",
+      "user_id": "user_delta_777",
+      "computed_bucket": 30,
+      "is_enabled": true
+    },
+    {
+      "flag_key": "payment_gateway_v3",
+      "user_id": "merchant_ny_450",
+      "computed_bucket": 22,
+      "is_enabled": true
+    }
+  ]
+}

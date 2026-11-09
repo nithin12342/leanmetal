@@ -1,0 +1,12 @@
+{
+  "name": "@edgeflag/zero-overhead",
+  "version": "0.1.0",
+  "description": "Zero-overhead in-process feature flag evaluation & guard SDK for TypeScript/JavaScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["feature-flags", "edgeflag", "zero-overhead", "openfeature", "xxhash"],
+  "license": "MIT"
+}

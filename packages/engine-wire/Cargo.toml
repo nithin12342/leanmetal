@@ -1,0 +1,14 @@
+[package]
+name = "engine-wire"
+version = "0.1.0"
+edition = "2024"
+description = "Manifest-driven asymmetric NACK protocol engine with bitset ledger and session slab"
+license = "MIT"
+
+[dependencies]
+engine-layout = { path = "../engine-layout" }
+
+[lib]
+name = "engine_wire"
+path = "src/lib.rs"
+crate-type = ["rlib"]

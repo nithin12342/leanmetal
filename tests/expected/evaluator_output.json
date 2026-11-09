@@ -1,0 +1,49 @@
+{
+  "total_evaluated": 4,
+  "cases": [
+    {
+      "test_id": "TC-01_enterprise_match",
+      "flag_key": "dynamic_checkout_flow",
+      "result": {
+        "flag_key": "dynamic_checkout_flow",
+        "enabled": true,
+        "variant": "one_click_enterprise",
+        "matched_rule_index": 0,
+        "reason": "rule_matched_0"
+      }
+    },
+    {
+      "test_id": "TC-02_beta_cart_match",
+      "flag_key": "dynamic_checkout_flow",
+      "result": {
+        "flag_key": "dynamic_checkout_flow",
+        "enabled": true,
+        "variant": "beta_discount_checkout",
+        "matched_rule_index": 1,
+        "reason": "rule_matched_1"
+      }
+    },
+    {
+      "test_id": "TC-03_default_fallback",
+      "flag_key": "dynamic_checkout_flow",
+      "result": {
+        "flag_key": "dynamic_checkout_flow",
+        "enabled": true,
+        "variant": "standard_checkout",
+        "matched_rule_index": null,
+        "reason": "default_fallback"
+      }
+    },
+    {
+      "test_id": "TC-04_emergency_kill_switch",
+      "flag_key": "emergency_killed_feature",
+      "result": {
+        "flag_key": "emergency_killed_feature",
+        "enabled": false,
+        "variant": null,
+        "matched_rule_index": null,
+        "reason": "flag_disabled"
+      }
+    }
+  ]
+}

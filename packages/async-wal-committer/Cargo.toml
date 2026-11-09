@@ -1,0 +1,15 @@
+[package]
+name = "async-wal-committer"
+version = "0.1.0"
+edition = "2024"
+description = "Ring-buffered asynchronous Write-Ahead Log (WAL) batch committer providing sub-100µs write acknowledgments"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+thiserror = "2.0"
+
+[lib]
+name = "async_wal_committer"
+path = "src/lib.rs"
+crate-type = ["rlib"]

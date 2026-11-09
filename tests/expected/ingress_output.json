@@ -1,0 +1,18 @@
+{
+  "health_status": "healthy",
+  "mutation_status_code": 200,
+  "evaluated_cases": [
+    {
+      "test_case": "vip_user_evaluation",
+      "status_code": 200,
+      "enabled": true,
+      "variant": "one_click_vip"
+    },
+    {
+      "test_case": "standard_user_fallback",
+      "status_code": 200,
+      "enabled": true,
+      "variant": "standard_3_step"
+    }
+  ]
+}

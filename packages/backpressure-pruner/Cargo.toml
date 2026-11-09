@@ -1,0 +1,14 @@
+[package]
+name = "backpressure-pruner"
+version = "0.1.0"
+edition = "2024"
+description = "Active slow-consumer eviction and backpressure defense engine to safeguard server memory from stalled clients"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+
+[lib]
+name = "backpressure_pruner"
+path = "src/lib.rs"
+crate-type = ["rlib"]

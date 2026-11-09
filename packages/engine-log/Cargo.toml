@@ -1,0 +1,18 @@
+[package]
+name = "engine-log"
+version = "0.1.0"
+edition = "2024"
+description = "Kafka-style sequential disk logging and zero-copy mmap store"
+license = "MIT"
+
+[dependencies]
+engine-layout = { path = "../engine-layout" }
+memmap2 = "0.9"
+
+[dev-dependencies]
+tempfile = "3.17"
+
+[lib]
+name = "engine_log"
+path = "src/lib.rs"
+crate-type = ["rlib"]

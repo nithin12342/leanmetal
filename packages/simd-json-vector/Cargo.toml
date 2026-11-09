@@ -1,0 +1,12 @@
+[package]
+name = "simd-json-vector"
+version = "0.1.0"
+edition = "2024"
+description = "Pure zero-dependency hand-rolled SIMD (AVX2/SSE2/SWAR) byte scanner and structural JSON indexer"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Pure zero-dependency: NO external crates used.
+
+[dev-dependencies]
+# Zero dev-dependencies: tests run on standard core/alloc.

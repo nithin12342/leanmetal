@@ -1,0 +1,16 @@
+[package]
+name = "singleflight-barrier"
+version = "0.1.0"
+edition = "2024"
+description = "High-performance in-flight read deduplication barrier using Tokio broadcast and DashMap concurrency"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["sync"] }
+futures = "0.3"
+dashmap = "6"
+
+[lib]
+name = "singleflight_barrier"
+path = "src/lib.rs"
+crate-type = ["rlib"]

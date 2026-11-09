@@ -1,0 +1,48 @@
+# EdgeFlag production stack: Daemonless All-Rust Stack (Zero external Valkey/Redis daemons).
+# Usage:
+#   $env:EDGEFLAG_ADMIN_TOKEN="change-me-in-prod"  # PowerShell
+#   docker compose up -d --build
+#   curl http://127.0.0.1:8080/health
+#   curl http://127.0.0.1:8081/health
+name: edgeflag
+
+services:
+  edgeflag:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      EDGEFLAG_DATA_DIR: /app/data
+      EDGEFLAG_NODE_ID: edgeflag-node-01
+      EDGEFLAG_ADMIN_TOKEN: ${EDGEFLAG_ADMIN_TOKEN:-edgeflag-admin-secret}
+      RUST_LOG: info,edgeflag=debug
+    volumes:
+      - edgeflag-data:/app/data
+    restart: unless-stopped
+
+  # Application 2: standalone social benchmark API (isolated 1 vCPU, 2048M RAM).
+  social:
+    build:
+      context: .
+      dockerfile: Dockerfile.social
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      EDGEFLAG_DATA_DIR: /app/data
+      EDGEFLAG_AUTO_SEED: "true"
+      RUST_LOG: info,edgeflag=debug
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2048M
+    volumes:
+      - social-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  edgeflag-data:
+  social-data:
+

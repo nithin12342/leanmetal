@@ -1,0 +1,27 @@
+{
+  "total_events_processed": 3,
+  "events": [
+    {
+      "event_id": "INV-001",
+      "flag_key": "checkout_v2",
+      "revision": 101,
+      "received_source": "edge-node-local",
+      "delivery_status": "DELIVERED_INSTANT"
+    },
+    {
+      "event_id": "INV-002",
+      "flag_key": "neural_search",
+      "revision": 42,
+      "received_source": "edge-node-local",
+      "delivery_status": "DELIVERED_INSTANT"
+    },
+    {
+      "event_id": "INV-003",
+      "flag_key": "emergency_kill_switch_billing",
+      "revision": 999,
+      "received_source": "edge-node-local",
+      "delivery_status": "DELIVERED_INSTANT"
+    }
+  ],
+  "average_delivery_latency_us": 47
+}

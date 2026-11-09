@@ -1,0 +1,84 @@
+{
+  "flags": [
+    {
+      "key": "dynamic_checkout_flow",
+      "enabled": true,
+      "rules": [
+        {
+          "conditions": [
+            { "field": "country", "op": "InSet", "value": ["US", "CA", "GB"] },
+            { "field": "app_version", "op": "SemverGte", "value": "3.0.0" },
+            { "field": "subscription_tier", "op": "Equals", "value": "enterprise" }
+          ],
+          "rollout_percentage": 100,
+          "variant": "one_click_enterprise"
+        },
+        {
+          "conditions": [
+            { "field": "segment_ids", "op": "Contains", "value": "beta_testers" },
+            { "field": "cart_value", "op": "GreaterThan", "value": 100.0 }
+          ],
+          "rollout_percentage": 50,
+          "variant": "beta_discount_checkout"
+        }
+      ],
+      "default_variant": "standard_checkout"
+    },
+    {
+      "key": "emergency_killed_feature",
+      "enabled": false,
+      "rules": [],
+      "default_variant": "dormant"
+    }
+  ],
+  "evaluation_requests": [
+    {
+      "test_id": "TC-01_enterprise_match",
+      "flag_key": "dynamic_checkout_flow",
+      "context": {
+        "user_id": "usr_corp_99",
+        "attributes": {
+          "country": "US",
+          "app_version": "3.2.0",
+          "subscription_tier": "enterprise",
+          "cart_value": 450.0
+        }
+      }
+    },
+    {
+      "test_id": "TC-02_beta_cart_match",
+      "flag_key": "dynamic_checkout_flow",
+      "context": {
+        "user_id": "usr_shopper_01",
+        "attributes": {
+          "country": "FR",
+          "app_version": "2.8.0",
+          "segment_ids": ["early_adopters", "beta_testers"],
+          "cart_value": 120.0
+        }
+      }
+    },
+    {
+      "test_id": "TC-03_default_fallback",
+      "flag_key": "dynamic_checkout_flow",
+      "context": {
+        "user_id": "usr_guest_404",
+        "attributes": {
+          "country": "JP",
+          "app_version": "1.5.0",
+          "cart_value": 25.0
+        }
+      }
+    },
+    {
+      "test_id": "TC-04_emergency_kill_switch",
+      "flag_key": "emergency_killed_feature",
+      "context": {
+        "user_id": "usr_admin_007",
+        "attributes": {
+          "subscription_tier": "enterprise"
+        }
+      }
+    }
+  ]
+}

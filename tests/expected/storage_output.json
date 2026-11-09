@@ -1,0 +1,22 @@
+{
+  "total_stored_flags": 2,
+  "flags": [
+    {
+      "flag_key": "search_ranking_v2",
+      "stored_byte_len": 268,
+      "read_variant_from_mmap": "bm25_legacy",
+      "evaluated_variant": "neural_ranker_v2"
+    },
+    {
+      "flag_key": "experimental_codec",
+      "stored_byte_len": 78,
+      "read_variant_from_mmap": "av1",
+      "evaluated_variant": "av1"
+    }
+  ],
+  "total_wal_entries": 2,
+  "wal_keys": [
+    "1:search_ranking_v2",
+    "2:experimental_codec"
+  ]
+}

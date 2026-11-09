@@ -1,0 +1,12 @@
+[package]
+name = "edge-guard-sdk"
+version = "0.1.0"
+edition = "2024"
+description = "Zero-overhead in-process feature guard traits and Tower/Axum middleware"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+fast-rule-evaluator = { path = "../fast-rule-evaluator" }
+axum = { version = "0.8", default-features = false }
+tower = { version = "0.5", features = ["util"] }
+http = "1"

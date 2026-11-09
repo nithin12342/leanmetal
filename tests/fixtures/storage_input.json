@@ -1,0 +1,39 @@
+{
+  "flags_to_store": [
+    {
+      "key": "search_ranking_v2",
+      "enabled": true,
+      "rules": [
+        {
+          "conditions": [
+            { "field": "country", "op": "Equals", "value": "US" },
+            { "field": "traffic_tier", "op": "InSet", "value": ["tier_1", "tier_2"] }
+          ],
+          "rollout_percentage": 100,
+          "variant": "neural_ranker_v2"
+        }
+      ],
+      "default_variant": "bm25_legacy"
+    },
+    {
+      "key": "experimental_codec",
+      "enabled": true,
+      "rules": [],
+      "default_variant": "av1"
+    }
+  ],
+  "audit_actions": [
+    {
+      "actor": "admin_alice@company.com",
+      "flag_key": "search_ranking_v2",
+      "operation": "CREATE_FLAG",
+      "payload": "{\"variant\": \"neural_ranker_v2\"}"
+    },
+    {
+      "actor": "ci_pipeline_bot",
+      "flag_key": "experimental_codec",
+      "operation": "ENABLE_CODEC",
+      "payload": "{\"default_variant\": \"av1\"}"
+    }
+  ]
+}

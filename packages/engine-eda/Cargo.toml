@@ -1,0 +1,21 @@
+[package]
+name = "engine-eda"
+version = "0.1.0"
+edition = "2024"
+description = "Event-driven architecture state engine, lock-free projections and L1 cache"
+license = "MIT"
+
+[dependencies]
+engine-layout = { path = "../engine-layout" }
+engine-disruptor = { path = "../engine-disruptor" }
+engine-log = { path = "../engine-log" }
+arc-swap = "1.7"
+moka = { version = "0.12", features = ["sync"] }
+
+[dev-dependencies]
+tempfile = "3.17"
+
+[lib]
+name = "engine_eda"
+path = "src/lib.rs"
+crate-type = ["rlib"]
